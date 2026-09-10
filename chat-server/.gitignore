@@ -1,0 +1,47 @@
+# Environment & Secret Credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+
+# Node dependencies
+node_modules/
+admin-panel/node_modules/
+.npm
+.pnpm-store
+
+# Local & Render session storage (contains active login tokens)
+data/admin_sessions.json
+admin_sessions.json
+*.tmp
+
+# Databases & local persistent storage
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Build outputs & caches
+dist/
+admin-panel/dist/
+build/
+.cache/
+.vite/
+admin-panel/.vite/
+
+# Runtime Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Windows local batch scripts
+*.bat

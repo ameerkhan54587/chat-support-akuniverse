@@ -1,0 +1,67 @@
+{
+  "id": "fbverse_bot",
+  "name": "FBVerse Bot",
+  "domain": "fbverse.com",
+  "site_type": "saas",
+  "status": "active",
+  "ai_reply": {
+    "widget": false,
+    "telegram": false,
+    "email": false
+  },
+  "api_key": "fbv_live_sec_7a89f2c3104e",
+  "description": "Facebook marketplace bot, profile automation, draft publisher, and account monitoring",
+  "currency": "USD",
+  "timezone": "UTC",
+  "allowed_origins": [
+    "https://fbverse.com",
+    "https://*.fbverse.com",
+    "http://localhost:5173",
+    "http://localhost:8080"
+  ],
+  "ai_prompt": "SITE: FBVerse Bot\nYou are the customer support assistant for FBVerse Bot.\nFBVerse provides advanced Facebook marketplace automation, draft publishers, account warming scripts, and multi-profile monitoring.\nAssist users with bot installation, cookie imports, marketplace listing limits, safety delays between postings, and license key activation.\nEscalate immediately on payment problems, unexpected account checkpoints, or licensing disputes.",
+  "escalation_keywords": [
+    "account banned",
+    "checkpoint",
+    "fraud",
+    "human",
+    "agent",
+    "lawsuit",
+    "license error"
+  ],
+  "confidence_threshold": 0.7,
+  "tone": "professional",
+  "telegram": {
+    "bot_token": "8893096087:AAEqvhzPQKc5wl9jPHtSPgEMuNSSeHMx89Y",
+    "username": "fbversebot",
+    "chat_id": "",
+    "enabled": true
+  },
+  "tickets": {
+    "auto_create": true,
+    "notify_telegram": false
+  },
+  "knowledge_base": [
+    {
+      "id": "kb_fb_1",
+      "title": "Welcome to FBVerse Bot",
+      "category": "General",
+      "content": "FBVerse Bot automates Facebook marketplace listings, draft publishing, and account warm-up sequences across multiple browser profiles simultaneously.",
+      "tags": "about, overview, features, bot"
+    },
+    {
+      "id": "kb_fb_2",
+      "title": "Connecting Facebook Profiles Safely",
+      "category": "Setup",
+      "content": "To prevent checkpoints, always pair each Facebook profile with a dedicated high-quality residential proxy and configure anti-detect browser fingerprints.",
+      "tags": "connect, account, setup, proxy, checkpoint"
+    },
+    {
+      "id": "kb_fb_3",
+      "title": "Recommended Posting Delays",
+      "category": "Best Practices",
+      "content": "We recommend setting posting intervals between 120 and 300 seconds per account to keep actions human-like and stay within Facebook rate limits.",
+      "tags": "delay, limits, marketplace, rate limit"
+    }
+  ]
+}

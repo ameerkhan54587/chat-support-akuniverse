@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Чат з підтримкою</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f4f4; padding: 20px; }
+        
+        /* Кнопка віджета */
+        .chat-btn {
+            position: fixed; bottom: 20px; right: 20px;
+            width: 60px; height: 60px;
+            background: #007bff; color: white;
+            border-radius: 50%; border: none; font-size: 30px;
+            cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            display: flex; align-items: center; justify-content: center;
+            transition: transform 0.2s;
+            z-index: 1000;
+        }
+        .chat-btn:hover { transform: scale(1.1); }
+
+        /* Вікно чату */
+        .chat-box {
+            position: fixed; bottom: 90px; right: 20px;
+            width: 350px; height: 500px;
+            background: white; border-radius: 12px;
+            box-shadow: 0 5px 25px rgba(0,0,0,0.2);
+            display: none; /* Сховано за замовчуванням */
+            flex-direction: column; overflow: hidden;
+            z-index: 1000;
+        }
+
+        .header { background: #007bff; color: white; padding: 15px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
+        .close-btn { cursor: pointer; font-size: 20px; opacity: 0.8; }
+        .close-btn:hover { opacity: 1; }
+
+        .messages { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; background: #f9f9f9; }
+        
+        .msg { padding: 10px 14px; border-radius: 10px; max-width: 80%; word-wrap: break-word; font-size: 14px; line-height: 1.4; }
+        
+        /* Стилі повідомлень */
+        .msg.me { background: #007bff; color: white; align-self: flex-end; border-bottom-right-radius: 2px; }
+        .msg.support { background: #e9ecef; color: #333; align-self: flex-start; border-bottom-left-radius: 2px; border: 1px solid #ddd; }
+        .msg.system { font-size: 12px; color: #888; text-align: center; align-self: center; background: none; }
+
+        .input-area { padding: 10px; border-top: 1px solid #ddd; display: flex; gap: 10px; background: white; }
+        input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 20px; outline: none; padding-left: 15px; }
+        button.send-btn { padding: 8px 15px; background: #007bff; color: white; border: none; border-radius: 20px; cursor: pointer; font-weight: bold; }
+        button.send-btn:hover { background: #0056b3; }
+    </style>
+</head>
+<body>
+
+    <h1>Тестова сторінка клієнта</h1>
+    <p>Натисніть на синю кнопку внизу праворуч, щоб почати чат.</p>
+
+    <button class="chat-btn" onclick="toggleChat()">💬</button>
+
+    <div class="chat-box" id="chatBox">
+        <div class="header">
+            <span>Онлайн підтримка</span>
+            <span class="close-btn" onclick="toggleChat()">×</span>
+        </div>
+        <div class="messages" id="msgs">
+            </div>
+        <div class="input-area">
+            <input type="text" id="inp" placeholder="Напишіть повідомлення..." onkeypress="handleEnter(event)">
+            <button class="send-btn" onclick="send()">Send</button>
+        </div>
+    </div>
+
+    <script>
+    window.KapliaChatConfig = {
+        defaultLanguage: 'ua', // Тут твій PHP код: '{{ get_current_language... }}'
+        initialMessages: [
+            "Привіт! Я тут, щоб допомогти вам." // Тут твій PHP: "{{ __('Ask your questions...', TEXTDOMAIN) }}"
+        ],
+        useAdminTimezone: true,
+        i18n: {
+            en: {
+                title: 'Hi there! 👋',
+                subtitle: "My name is Vitalii. How can I assist you today?",
+                inputPlaceholder: 'Type your question..',
+                sendBtn: 'Send'
+            },
+            ru: {
+                title: 'Привет! 👋',
+                subtitle: "Меня зовут Виталий. Чем могу вам помочь?",
+                inputPlaceholder: 'Введите свой вопрос..',
+                sendBtn: 'Отпр'
+            },
+            ua: {
+                title: 'Привіт! 👋',
+                subtitle: "Мене звати Віталій. Чим можу вам допомогти?",
+                inputPlaceholder: 'Введіть своє запитання..',
+                sendBtn: 'Надіслати'
+            },
+        },
+        metadata: {
+            user_session: 'sess_12345', // Твій PHP: '{{ session_info }}'
+            user_id: '42',              // Твій PHP: '{{ user.id }}'
+            user_name: 'Vitaliy',       // Твій PHP: '{{ user.name }}'
+            user_email: 'dev@test.com'  // Твій PHP: '{{ user.email }}'
+        }
+    };
+</script>
+<script src="https://chat.kaplia.pro/widget.js"></script>
+
+</body>
+</html>

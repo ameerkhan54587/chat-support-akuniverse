@@ -1,0 +1,63 @@
+{
+  "id": "turboproxy",
+  "name": "TurboProxy",
+  "domain": "turboproxy.com",
+  "site_type": "proxy",
+  "status": "active",
+  "ai_reply": {
+    "widget": false,
+    "telegram": false,
+    "email": false
+  },
+  "api_key": "tprx_live_sec_1d83c7e9204b",
+  "description": "High-speed HTTP and SOCKS5 residential & datacenter proxy solutions",
+  "currency": "USD",
+  "timezone": "America/New_York",
+  "allowed_origins": [
+    "https://turboproxy.com",
+    "https://*.turboproxy.com"
+  ],
+  "ai_prompt": "SITE: TurboProxy\nYou are the dedicated customer support assistant for TurboProxy.\nTurboProxy provides premium residential, datacenter, and mobile proxies.\nHelp customers configure proxies (HTTP and SOCKS5), explain port configurations, IP whitelist authorization vs User:Pass authorization, and bandwidth management.\nStrictly use the TurboProxy Knowledge Base. Never discuss other sites.",
+  "escalation_keywords": [
+    "chargeback",
+    "lawsuit",
+    "talk to human",
+    "agent",
+    "refund dispute",
+    "scam"
+  ],
+  "confidence_threshold": 0.7,
+  "tone": "technical",
+  "telegram": {
+    "bot_token": "",
+    "chat_id": "",
+    "enabled": false
+  },
+  "tickets": {
+    "auto_create": true,
+    "notify_telegram": false
+  },
+  "knowledge_base": [
+    {
+      "id": "kb_proxy_1",
+      "title": "How to configure SOCKS5 Proxy",
+      "category": "Technical",
+      "content": "To connect via SOCKS5: Host: proxy.turboproxy.com, Port: 1080. Enter your assigned username and password or whitelist your server IP in dashboard.",
+      "tags": "socks5, setup, configuration, port"
+    },
+    {
+      "id": "kb_proxy_2",
+      "title": "Refund Policy & Bandwidth Usage",
+      "category": "Billing",
+      "content": "Refunds are granted within 48 hours of initial purchase if less than 500MB of bandwidth has been consumed.",
+      "tags": "refund, billing, terms, bandwidth"
+    },
+    {
+      "id": "kb_proxy_3",
+      "title": "Rotating vs Sticky Sessions",
+      "category": "Technical",
+      "content": "Sticky sessions hold an IP address for 10 to 30 minutes, ideal for account management. Rotating mode assigns a brand new IP address on every single HTTP request.",
+      "tags": "sticky, rotating, session, ip"
+    }
+  ]
+}

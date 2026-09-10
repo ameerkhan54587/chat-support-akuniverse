@@ -1,0 +1,65 @@
+{
+  "id": "smsotps",
+  "name": "SMSOTPs",
+  "domain": "smsotps.com",
+  "site_type": "smsservice",
+  "status": "active",
+  "ai_reply": {
+    "widget": false,
+    "telegram": false,
+    "email": false
+  },
+  "api_key": "sotp_live_sec_3c42a8d7901f",
+  "description": "Instant virtual numbers and temporary SMS verification codes",
+  "currency": "EUR",
+  "timezone": "Europe/Berlin",
+  "allowed_origins": [
+    "https://smsotps.com",
+    "https://*.smsotps.com"
+  ],
+  "ai_prompt": "SITE: SMSOTPs\nYou are the customer support representative for SMSOTPs.\nSMSOTPs provides virtual phone numbers for receiving SMS verification codes.\nExplain how to rent numbers, why codes might be delayed, and auto-refund procedures.\nAlways be friendly and helpful. If a user asks about an unreceived SMS, remind them that rentals auto-cancel and refund after 10 minutes.",
+  "escalation_keywords": [
+    "police",
+    "illegal",
+    "scam",
+    "fraud",
+    "human",
+    "chargeback",
+    "agent"
+  ],
+  "confidence_threshold": 0.7,
+  "tone": "friendly",
+  "telegram": {
+    "bot_token": "8954500742:AAGG5her1O8H2h3TLtbTjxPk0GA8petos6g",
+    "username": "smsotps_officialbot",
+    "chat_id": "",
+    "enabled": true
+  },
+  "tickets": {
+    "auto_create": true,
+    "notify_telegram": false
+  },
+  "knowledge_base": [
+    {
+      "id": "kb_sms_1",
+      "title": "Unreceived Code & Auto Refund",
+      "category": "Billing",
+      "content": "If an SMS verification code does not arrive within 10 minutes, the rental is automatically cancelled and 100% of credits are refunded immediately to your account balance.",
+      "tags": "refund, code, delay, credits"
+    },
+    {
+      "id": "kb_sms_2",
+      "title": "Rental Duration & Supported Services",
+      "category": "Service",
+      "content": "Numbers can be rented for single-use verification (15 minutes) or extended long-term rentals (up to 30 days) for supported platforms like WhatsApp, Telegram, Google, and OpenAI.",
+      "tags": "rental, duration, services"
+    },
+    {
+      "id": "kb_sms_3",
+      "title": "Payment Methods Accepted",
+      "category": "Payments",
+      "content": "We support balance top-ups via Crypto (USDT, BTC, LTC), Credit/Debit Cards (Stripe), and Binance Pay with an instant credit policy.",
+      "tags": "crypto, stripe, payment, deposit"
+    }
+  ]
+}

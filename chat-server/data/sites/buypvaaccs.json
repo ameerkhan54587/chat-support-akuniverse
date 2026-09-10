@@ -1,0 +1,65 @@
+{
+  "id": "buypvaaccs",
+  "name": "BuyPVAccs",
+  "domain": "buypvaaccs.com",
+  "site_type": "ecommerce",
+  "status": "active",
+  "ai_reply": {
+    "widget": false,
+    "telegram": false,
+    "email": false
+  },
+  "api_key": "bpva_live_sec_9b21e4f5018a",
+  "description": "Aged & Fresh Phone Verified Accounts (PVA) for Facebook, Gmail, Twitter, Instagram, and TikTok",
+  "currency": "USD",
+  "timezone": "UTC",
+  "allowed_origins": [
+    "https://buypvaaccs.com",
+    "https://*.buypvaaccs.com"
+  ],
+  "ai_prompt": "SITE: BuyPVAccs\nYou are the customer support representative for BuyPVAccs.\nBuyPVAccs sells aged and fresh Phone Verified Accounts (PVA) for social media, email providers, and messaging platforms.\nAssist customers with order delivery status, account login formats (User:Pass:Email:EmailPass:2FA_Secret:Cookies), anti-detect browser setup, and our 48-hour replacement warranty.\nIf an account is non-functional on initial delivery, guide the customer on how to submit a replacement request with proof.",
+  "escalation_keywords": [
+    "scam",
+    "police",
+    "lawsuit",
+    "refund",
+    "human",
+    "agent",
+    "chargeback",
+    "broken account"
+  ],
+  "confidence_threshold": 0.7,
+  "tone": "professional",
+  "telegram": {
+    "bot_token": "",
+    "chat_id": "",
+    "enabled": false
+  },
+  "tickets": {
+    "auto_create": true,
+    "notify_telegram": false
+  },
+  "knowledge_base": [
+    {
+      "id": "kb_pva_1",
+      "title": "48-Hour Replacement Guarantee",
+      "category": "Warranty",
+      "content": "All accounts come with a 48-hour replacement guarantee. If an account is locked or invalid upon first login before you modify credentials, contact support with the order ID for an instant replacement.",
+      "tags": "warranty, replacement, guarantee, invalid"
+    },
+    {
+      "id": "kb_pva_2",
+      "title": "How to Safely Log In to PVA Accounts",
+      "category": "Guide",
+      "content": "Always use clean residential proxies corresponding to the account's registration country. Use an anti-detect browser (AdsPower, Dolphin{anty}, Multilogin) and import session cookies when provided.",
+      "tags": "login, guide, cookies, proxy, anti-detect"
+    },
+    {
+      "id": "kb_pva_3",
+      "title": "Instant Delivery & Account Formats",
+      "category": "Delivery",
+      "content": "Orders are delivered automatically to your email and dashboard upon payment confirmation. Format: username:password:recovery_email:2fa_secret.",
+      "tags": "delivery, instant, format, credentials"
+    }
+  ]
+}

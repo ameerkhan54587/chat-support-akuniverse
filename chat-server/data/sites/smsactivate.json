@@ -1,0 +1,66 @@
+{
+  "id": "smsactivate",
+  "name": "SMSActivate",
+  "domain": "smsactivate.org",
+  "site_type": "smsservice",
+  "status": "active",
+  "ai_reply": {
+    "widget": false,
+    "telegram": false,
+    "email": false
+  },
+  "api_key": "sact_live_sec_6e51b9f8423c",
+  "description": "Disposable and rental numbers for receiving SMS activations across 180+ countries",
+  "currency": "USD",
+  "timezone": "UTC",
+  "allowed_origins": [
+    "https://smsactivate.org",
+    "https://*.smsactivate.org",
+    "https://sms-activate.org"
+  ],
+  "ai_prompt": "SITE: SMSActivate\nYou are the customer support assistant for SMSActivate.\nSMSActivate provides real SIM and virtual numbers for SMS verification across 180+ countries.\nHelp customers with selecting countries, choosing the right service (Telegram, WhatsApp, Google, Tinder, etc.), checking SMS receipt status, API integration, and API key management.\nIf an SMS is not received, guide them to click the cancel button to get a full refund.",
+  "escalation_keywords": [
+    "stolen",
+    "police",
+    "refund problem",
+    "fraud",
+    "human",
+    "agent",
+    "scam"
+  ],
+  "confidence_threshold": 0.7,
+  "tone": "helpful",
+  "telegram": {
+    "bot_token": "8524568763:AAEygpjKPxYpV_emh244yazhvbsDA1LMqZY",
+    "username": "smsactivateukbot",
+    "chat_id": "",
+    "enabled": true
+  },
+  "tickets": {
+    "auto_create": true,
+    "notify_telegram": false
+  },
+  "knowledge_base": [
+    {
+      "id": "kb_act_1",
+      "title": "How Activation Works",
+      "category": "Guide",
+      "content": "Select the service and country you need, purchase the number, copy it to your application, and wait for the verification code to appear in your active orders dashboard within 20 minutes.",
+      "tags": "how to, activation, steps, order"
+    },
+    {
+      "id": "kb_act_2",
+      "title": "Cancellation and Refund Policy",
+      "category": "Billing",
+      "content": "If you don't receive an SMS code within the activation window, click Cancel. The money is automatically and immediately credited back to your balance.",
+      "tags": "cancel, refund, money back"
+    },
+    {
+      "id": "kb_act_3",
+      "title": "API Documentation & Keys",
+      "category": "Developers",
+      "content": "You can integrate our API using standard HTTP GET requests. Generate your API key in Profile > API Settings.",
+      "tags": "api, developer, integration"
+    }
+  ]
+}
