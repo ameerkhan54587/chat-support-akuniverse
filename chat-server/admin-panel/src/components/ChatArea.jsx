@@ -228,10 +228,22 @@ export function ChatArea({ onSendMessage, onDeleteMessage, onLoadMore, onDeleteS
               const status = sessionAiStatuses[activeUserId] || 'active';
               if (status === 'active') {
                 return (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                    🤖 AI Active
-                  </span>
+                  <div className="inline-flex items-center gap-1.5">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      🤖 AI Active
+                    </span>
+                    {onPauseAI && (
+                      <button
+                        type="button"
+                        onClick={() => onPauseAI(activeUserId)}
+                        className="px-2 py-0.5 text-xs font-medium bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 rounded-md shadow-sm transition flex items-center gap-1"
+                        title="Pause AI auto-replies for this chat"
+                      >
+                        ⏸️ Pause AI
+                      </button>
+                    )}
+                  </div>
                 );
               }
               if (status === 'human_active') {

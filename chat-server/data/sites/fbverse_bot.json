@@ -5,8 +5,8 @@
   "site_type": "saas",
   "status": "active",
   "ai_reply": {
-    "widget": false,
-    "telegram": false,
+    "widget": true,
+    "telegram": true,
     "email": false
   },
   "api_key": "fbv_live_sec_7a89f2c3104e",

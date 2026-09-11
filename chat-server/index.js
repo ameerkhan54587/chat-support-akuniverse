@@ -271,6 +271,7 @@ function syncSiteTelegramBots() {
 // Initialize Turso/SQLite Database schema and load admin settings
 initDatabase(db).then(() => {
     loadAdminConfigFromDb(() => {
+        refreshSiteDbMap();
         syncSiteTelegramBots();
         if (telegramConfig.enabled && telegramConfig.botToken && typeof startTelegramBot === 'function' && !telegramPollTimeout) {
             setTimeout(() => {
@@ -1225,16 +1226,57 @@ app.get('/api/auth/sessions', requireAdminAuth, (req, res) => {
     });
 });
 
-// Helper: Resolve numeric site_id from slug, name, or number
+// Helper: Cache mapping of site slug / domain / name to DB numeric ID
+const siteSlugToDbId = new Map();
+
+function refreshSiteDbMap(callback = () => {}) {
+    db.all("SELECT id, domain, name FROM sites", [], (err, rows) => {
+        if (!err && Array.isArray(rows)) {
+            siteSlugToDbId.clear();
+            const allSites = configLoader.getAllSites ? configLoader.getAllSites() : [];
+
+            for (const row of rows) {
+                siteSlugToDbId.set(String(row.id), row.id);
+                siteSlugToDbId.set(row.id, row.id);
+                if (row.domain) siteSlugToDbId.set(row.domain.toLowerCase(), row.id);
+                if (row.name) siteSlugToDbId.set(row.name.toLowerCase(), row.id);
+            }
+
+            for (const s of allSites) {
+                const foundRow = rows.find(r => 
+                    (r.domain && s.domain && r.domain.toLowerCase() === s.domain.toLowerCase()) ||
+                    (r.name && s.name && r.name.toLowerCase() === s.name.toLowerCase()) ||
+                    s.id.toLowerCase() === r.name?.toLowerCase() ||
+                    s.id.toLowerCase().includes(r.name?.toLowerCase()) ||
+                    (r.name && s.id.toLowerCase().includes(r.name.toLowerCase().replace(/\s+/g, '')))
+                );
+                if (foundRow) {
+                    siteSlugToDbId.set(s.id.toLowerCase(), foundRow.id);
+                }
+            }
+        }
+        callback();
+    });
+}
+
 function resolveSiteId(input) {
-    if (!input) return 1;
+    if (!input) return 3; // Default to FBVerse Bot (id 3)
     if (typeof input === 'number') return input;
-    const num = parseInt(input, 10);
+    const clean = String(input).toLowerCase().trim();
+    if (siteSlugToDbId.has(clean)) {
+        return siteSlugToDbId.get(clean);
+    }
+    const num = parseInt(clean, 10);
     if (!isNaN(num) && num > 0) return num;
 
-    const allSites = configLoader.getAllSites ? configLoader.getAllSites() : [];
-    const index = allSites.findIndex(s => s.id === input || s.domain === input || s.name?.toLowerCase() === String(input).toLowerCase());
-    return index !== -1 ? index + 1 : 1;
+    // Direct slug lookups
+    if (clean.includes('fbverse')) return siteSlugToDbId.get('fbverse_bot') || 3;
+    if (clean.includes('turboproxy')) return siteSlugToDbId.get('turboproxy') || 1;
+    if (clean.includes('smsotps')) return siteSlugToDbId.get('smsotps') || 2;
+    if (clean.includes('buypva')) return siteSlugToDbId.get('buypvaaccs') || 12;
+    if (clean.includes('smsactivate')) return siteSlugToDbId.get('smsactivate') || 13;
+
+    return 3;
 }
 
 // Helper: Authorize tickets creation via Admin API token OR Site api_key (for software/bots)
@@ -1585,10 +1627,24 @@ app.get('/api/tickets', requireAdminAuth, (req, res) => {
 
     db.all(query, params, (err, tickets) => {
         if (err) return res.status(500).json({ error: 'db_error' });
+        const allSites = configLoader.getAllSites ? configLoader.getAllSites() : [];
         const parsed = (tickets || []).map(t => {
             let summary = {};
             try { summary = JSON.parse(t.ai_summary || '{}'); } catch (e) {}
-            return { ...t, ai_summary: summary };
+
+            const siteJson = allSites.find(s => 
+                siteSlugToDbId.get(s.id) === t.site_id || 
+                (t.site_domain && s.domain && s.domain.toLowerCase() === t.site_domain.toLowerCase()) ||
+                (t.site_name && s.name && s.name.toLowerCase() === t.site_name.toLowerCase()) ||
+                String(t.site_id).toLowerCase() === s.id.toLowerCase()
+            );
+
+            return {
+                ...t,
+                site_name: siteJson ? siteJson.name : (t.site_name || `Site #${t.site_id}`),
+                site_domain: siteJson ? siteJson.domain : (t.site_domain || ''),
+                ai_summary: summary
+            };
         });
         res.json(parsed);
     });
@@ -1648,12 +1704,17 @@ app.post('/api/tickets', requireTicketAuth, security.sensitiveRateLimiter(30), (
 
             const ticketId = this.lastID;
 
+            const allSites = configLoader.getAllSites ? configLoader.getAllSites() : [];
+            const siteObj = allSites.find(s => s.id === targetSiteSlug || siteSlugToDbId.get(s.id) === resolvedSiteId);
+            const siteName = siteObj?.name || req.site?.name || targetSiteSlug;
+
             broadcastToAdmins({
                 type: 'new_ticket',
                 ticket: {
                     id: ticketId,
                     site_id: resolvedSiteId,
-                    site_name: req.site?.name || targetSiteSlug,
+                    site_name: siteName,
+                    site_domain: siteObj?.domain || '',
                     channel_type: finalChannel,
                     subject: finalSubject,
                     priority: finalPriority,
@@ -1708,12 +1769,17 @@ app.post('/api/bugs', requireTicketAuth, security.sensitiveRateLimiter(30), (req
                 return res.status(500).json({ error: 'db_error', message: err.message });
             }
 
+            const allSites = configLoader.getAllSites ? configLoader.getAllSites() : [];
+            const siteObj = allSites.find(s => s.id === targetSiteSlug || siteSlugToDbId.get(s.id) === resolvedSiteId);
+            const siteName = siteObj?.name || req.site?.name || targetSiteSlug;
+
             broadcastToAdmins({
                 type: 'new_ticket',
                 ticket: {
                     id: this.lastID,
                     site_id: resolvedSiteId,
-                    site_name: req.site?.name || targetSiteSlug,
+                    site_name: siteName,
+                    site_domain: siteObj?.domain || '',
                     channel_type: 'software',
                     subject: finalSubject,
                     priority: priority || 'high',
