@@ -75,7 +75,7 @@ export function showBrowserNotification(title, body, userId = 'general', options
     };
 
     setTimeout(() => {
-      try { notification.close(); } catch (e) {}
+      try { notification.close(); } catch { /* Browser may already have closed it. */ }
     }, 6500);
   } catch (err) {
     console.warn('Web notification dispatch failed:', err);

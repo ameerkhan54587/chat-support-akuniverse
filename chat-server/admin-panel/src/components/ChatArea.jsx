@@ -5,11 +5,12 @@ import { Message } from './Message';
 import { SystemMessage } from './SystemMessage';
 import { isDifferentDay, getDateDivider } from '../utils/dateUtils';
 
-export function ChatArea({ onSendMessage, onDeleteMessage, onLoadMore, onDeleteSystemMessages, onOpenSidebar, sidebarOpen, onAdminTyping, onResumeAI, onPauseAI }) {
-  const { state, clearAiSuggestion } = useChat();
+export function ChatArea({ onSendMessage, onDeleteMessage, onLoadMore, onDeleteSystemMessages, onOpenSidebar, onAdminTyping, tickets = [], onTicketViewed, onTicketStatusChange }) {
+  const { state } = useChat();
   const { t } = useTranslation();
-  const { activeUserId, messages, usersInfo, typingText, config, hasMoreMessages, loadingMoreMessages, aiSuggestions = {}, sessionAiStatuses = {} } = state;
+  const { activeUserId, messages, usersInfo, typingText, config, hasMoreMessages, loadingMoreMessages } = state;
   const [inputText, setInputText] = useState('');
+  const [expandedTicketId, setExpandedTicketId] = useState(null);
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const isInitialLoadRef = useRef(true);
@@ -220,74 +221,9 @@ export function ChatArea({ onSendMessage, onDeleteMessage, onLoadMore, onDeleteS
                     🌐 {host}
                   </span>
                 );
-              } catch (e) { return null; }
+              } catch { return null; }
             })()}
 
-            {/* AI Status Indicator */}
-            {(() => {
-              const status = sessionAiStatuses[activeUserId] || 'active';
-              if (status === 'active') {
-                return (
-                  <div className="inline-flex items-center gap-1.5">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                      🤖 AI Active
-                    </span>
-                    {onPauseAI && (
-                      <button
-                        type="button"
-                        onClick={() => onPauseAI(activeUserId)}
-                        className="px-2 py-0.5 text-xs font-medium bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 rounded-md shadow-sm transition flex items-center gap-1"
-                        title="Pause AI auto-replies for this chat"
-                      >
-                        ⏸️ Pause AI
-                      </button>
-                    )}
-                  </div>
-                );
-              }
-              if (status === 'human_active') {
-                return (
-                  <div className="inline-flex items-center gap-1.5">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                      👤 Human Active
-                    </span>
-                    {onResumeAI && (
-                      <button
-                        type="button"
-                        onClick={() => onResumeAI(activeUserId)}
-                        className="px-2.5 py-0.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-md shadow-sm transition flex items-center gap-1"
-                        title="Return conversation to automated AI handling"
-                      >
-                        🤖 Resume AI
-                      </button>
-                    )}
-                  </div>
-                );
-              }
-              if (status === 'escalated') {
-                return (
-                  <div className="inline-flex items-center gap-1.5">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200">
-                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"></span>
-                      ⚠️ Escalated
-                    </span>
-                    {onResumeAI && (
-                      <button
-                        type="button"
-                        onClick={() => onResumeAI(activeUserId)}
-                        className="px-2.5 py-0.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-md shadow-sm transition flex items-center gap-1"
-                        title="Resume AI handling"
-                      >
-                        🤖 Resume AI
-                      </button>
-                    )}
-                  </div>
-                );
-              }
-              return null;
-            })()}
           </div>
           <button
             onClick={onDeleteSystemMessages}
@@ -328,6 +264,52 @@ export function ChatArea({ onSendMessage, onDeleteMessage, onLoadMore, onDeleteS
         </div>
       </div>
 
+      {tickets.length > 0 && (
+        <section className="border-b border-amber-200 bg-amber-50/70 px-4 py-3 space-y-2" aria-label="Support tickets for this chat">
+          {tickets.map(ticket => {
+            const expanded = expandedTicketId === ticket.id;
+            const isResolved = ticket.status === 'resolved';
+            return (
+              <article key={ticket.id} className="rounded-xl border border-amber-200 bg-white shadow-xs overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExpandedTicketId(expanded ? null : ticket.id);
+                    if (!expanded && (!ticket.is_read || ticket.is_read === 0)) onTicketViewed?.(ticket.id);
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-amber-50 transition"
+                  aria-expanded={expanded}
+                >
+                  <span className="w-8 h-8 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center flex-shrink-0">🎫</span>
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-xs font-bold text-gray-800 truncate">#{ticket.id} · {ticket.subject || 'Support ticket'}</span>
+                    <span className="block text-[11px] text-gray-500">{ticket.site_name || 'Support'} · {isResolved ? 'Resolved' : 'Open'}{ticket.is_read ? '' : ' · New'}</span>
+                  </span>
+                  <span className="text-xs font-semibold text-blue-700">{expanded ? 'Close' : 'View & reply'} {expanded ? '⌃' : '⌄'}</span>
+                </button>
+                {expanded && (
+                  <div className="border-t border-amber-100 px-3 py-3 space-y-3">
+                    <div className="text-sm text-gray-700 whitespace-pre-wrap">{ticket.subject || 'Support ticket'}</div>
+                    {ticket.error_log && (
+                      <pre className="max-h-40 overflow-auto rounded-lg bg-slate-950 p-3 text-[11px] leading-relaxed text-emerald-300 whitespace-pre-wrap">{ticket.error_log}</pre>
+                    )}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={`text-[11px] font-semibold ${isResolved ? 'text-emerald-700' : 'text-blue-700'}`}>{isResolved ? 'Resolved' : 'Open ticket'}</span>
+                      <button
+                        type="button"
+                        onClick={() => onTicketStatusChange?.(ticket.id, ticket.status)}
+                        className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                      >{isResolved ? 'Reopen' : 'Mark resolved'}</button>
+                    </div>
+                    <p className="text-[11px] text-gray-500">Reply to the customer using the chat box below.</p>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </section>
+      )}
+
       {/* Messages container */}
       <div
         ref={messagesContainerRef}
@@ -358,68 +340,6 @@ export function ChatArea({ onSendMessage, onDeleteMessage, onLoadMore, onDeleteS
           </div>
         </div>
       )}
-
-      {/* AI Suggested Reply Banner */}
-      {(() => {
-        const suggestion = aiSuggestions[activeUserId];
-        if (!suggestion) return null;
-        return (
-          <div className="mx-4 mb-2 p-3.5 bg-gradient-to-r from-blue-50/90 to-indigo-50/90 border border-blue-200/80 rounded-xl shadow-sm backdrop-blur-sm">
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="flex items-center gap-2">
-                <span className="flex h-2 w-2 relative">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-                </span>
-                <span className="text-xs font-bold text-blue-900 tracking-wide uppercase">💡 AI Suggested Reply</span>
-                {suggestion.confidence && (
-                  <span className="text-[11px] bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded font-medium border border-blue-200">
-                    {(suggestion.confidence * 100).toFixed(0)}% match
-                  </span>
-                )}
-                {suggestion.siteName && (
-                  <span className="text-[11px] text-gray-500 font-medium">
-                    • {suggestion.siteName}
-                  </span>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => clearAiSuggestion(activeUserId)}
-                className="text-gray-400 hover:text-gray-600 text-xs px-1.5 py-0.5 rounded hover:bg-black/5 transition"
-                title="Dismiss suggestion"
-              >
-                ✕
-              </button>
-            </div>
-            <p className="text-sm text-gray-800 mb-2.5 leading-relaxed bg-white/80 p-2.5 rounded-lg border border-blue-100/80 select-text">
-              {suggestion.suggestion}
-            </p>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setInputText(suggestion.suggestion);
-                  clearAiSuggestion(activeUserId);
-                }}
-                className="text-xs bg-white hover:bg-gray-50 text-blue-700 font-medium px-3 py-1.5 rounded-lg border border-blue-200 shadow-sm transition flex items-center gap-1.5"
-              >
-                <span>✍️ Use & Edit</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  onSendMessage(activeUserId, suggestion.suggestion);
-                  clearAiSuggestion(activeUserId);
-                }}
-                className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-medium px-3.5 py-1.5 rounded-lg shadow-sm transition flex items-center gap-1.5"
-              >
-                <span>🚀 Send Directly</span>
-              </button>
-            </div>
-          </div>
-        );
-      })()}
 
       {/* Input area */}
       <form onSubmit={handleSubmit} className="bg-white border-t border-gray-200 p-4">

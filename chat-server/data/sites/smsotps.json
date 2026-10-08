@@ -4,12 +4,6 @@
   "domain": "smsotps.com",
   "site_type": "smsservice",
   "status": "active",
-  "ai_reply": {
-    "widget": false,
-    "telegram": false,
-    "email": false
-  },
-  "api_key": "sotp_live_sec_3c42a8d7901f",
   "description": "Instant virtual numbers and temporary SMS verification codes",
   "currency": "EUR",
   "timezone": "Europe/Berlin",
@@ -17,20 +11,7 @@
     "https://smsotps.com",
     "https://*.smsotps.com"
   ],
-  "ai_prompt": "SITE: SMSOTPs\nYou are the customer support representative for SMSOTPs.\nSMSOTPs provides virtual phone numbers for receiving SMS verification codes.\nExplain how to rent numbers, why codes might be delayed, and auto-refund procedures.\nAlways be friendly and helpful. If a user asks about an unreceived SMS, remind them that rentals auto-cancel and refund after 10 minutes.",
-  "escalation_keywords": [
-    "police",
-    "illegal",
-    "scam",
-    "fraud",
-    "human",
-    "chargeback",
-    "agent"
-  ],
-  "confidence_threshold": 0.7,
-  "tone": "friendly",
   "telegram": {
-    "bot_token": "8954500742:AAGG5her1O8H2h3TLtbTjxPk0GA8petos6g",
     "username": "smsotps_officialbot",
     "chat_id": "",
     "enabled": true

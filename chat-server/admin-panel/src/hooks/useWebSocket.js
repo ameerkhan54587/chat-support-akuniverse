@@ -13,6 +13,7 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
   const onSystemMessageRef = useRef(onSystemMessage);
   const passwordRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
+  const connectRef = useRef(null);
   const isManualDisconnectRef = useRef(false);
   const onSearchResultsRef = useRef(null);
   const usersInfoRef = useRef({});
@@ -34,9 +35,6 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
     setNotification,
     setUserOnline,
     setTabActive,
-    setAiSuggestion,
-    clearAiSuggestion,
-    setSessionAiStatus,
   } = useChat();
 
   // Keep refs in sync with state
@@ -228,32 +226,6 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
             lastMessage: { text: data.text, timestamp: data.timestamp, sender: 'support' },
           });
         }
-        clearAiSuggestion(data.targetId);
-        break;
-
-      case 'ai_suggestion':
-        setAiSuggestion({
-          targetId: data.targetId,
-          suggestion: data.suggestion,
-          confidence: data.confidence,
-          siteId: data.siteId,
-          siteName: data.siteName,
-          action: data.action,
-          reason: data.reason,
-          summary: data.summary,
-          timestamp: data.timestamp
-        });
-        break;
-
-      case 'session_ai_status_update':
-        setSessionAiStatus(data.targetId, data.status);
-        break;
-
-      case 'session_escalated':
-        setSessionAiStatus(data.targetId, 'escalated');
-        if (onSystemMessageRef.current) {
-          onSystemMessageRef.current(`⚠️ Conversation with ${data.siteName || 'customer'} escalated to human support!`);
-        }
         break;
 
       case 'new_ticket':
@@ -370,6 +342,7 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
     setNotification,
     setUserOnline,
     setTabActive,
+    prependMessages,
   ]);
 
   // Keep handleMessage ref updated
@@ -519,7 +492,7 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
           console.log('Connection lost, reconnecting in 2 seconds...');
           reconnectTimeoutRef.current = setTimeout(() => {
             if (passwordRef.current && !isManualDisconnectRef.current) {
-              connect(passwordRef.current, null, false, true).catch(() => {}); // silent = true for reconnect
+              connectRef.current?.(passwordRef.current, null, false, true).catch(() => {}); // silent reconnect
             }
           }, 2000);
         } else {
@@ -532,6 +505,10 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
       };
     });
   }, [setAuthenticated, setConfig]);
+
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   const send = useCallback((data) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -562,74 +539,6 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
 
   const deleteSystemMessages = useCallback((targetId) => {
     send({ type: 'delete_system_messages', targetId });
-  }, [send]);
-
-  const changePassword = useCallback((newPassword) => {
-    send({ type: 'change_password', newPassword });
-  }, [send]);
-
-  const changeApiToken = useCallback((newToken) => {
-    send({ type: 'change_api_token', newToken });
-  }, [send]);
-
-  const updateWebhook = useCallback((url, enabled) => {
-    send({ type: 'update_webhook', url, enabled });
-  }, [send]);
-
-  const updateTimeSettings = useCallback((timezone, dateFormat, timeFormat) => {
-    send({ type: 'update_time_settings', timezone, dateFormat, timeFormat });
-  }, [send]);
-
-  const updateRealtimeTyping = useCallback((enabled) => {
-    send({ type: 'update_realtime_typing', enabled });
-  }, [send]);
-
-  const updateSystemLogs = useCallback((setting, enabled) => {
-    send({ type: 'update_system_logs', setting, enabled });
-  }, [send]);
-
-  const updateLanguage = useCallback((language) => {
-    send({ type: 'update_language', language });
-  }, [send]);
-
-  const updateAllowedOrigins = useCallback((origins) => {
-    send({ type: 'update_allowed_origins', origins });
-  }, [send]);
-
-  const updateAnonymousOrigins = useCallback((origins) => {
-    send({ type: 'update_anonymous_origins', origins });
-  }, [send]);
-
-  const updateRateLimit = useCallback((maxMessagesPerMinute, maxMessageLength) => {
-    send({ type: 'update_rate_limit', maxMessagesPerMinute, maxMessageLength });
-  }, [send]);
-
-  const updateMessageLimits = useCallback((adminMessagesLimit, widgetMessagesLimit) => {
-    send({ type: 'update_message_limits', adminMessagesLimit, widgetMessagesLimit });
-  }, [send]);
-
-  const updateBusinessHours = useCallback((businessHours) => {
-    send({ type: 'update_business_hours', businessHours });
-  }, [send]);
-
-  const updateSmtp = useCallback((smtpConfig) => {
-    send({ type: 'update_smtp', smtpConfig });
-  }, [send]);
-
-  const updateTelegramSettings = useCallback((telegramConfig) => {
-    send({ type: 'update_telegram_settings', telegramConfig });
-  }, [send]);
-
-  const updateTelegramBots = useCallback((bots) => {
-    send({ type: 'update_telegram_bots', bots });
-  }, [send]);
-
-  const toggleTelegramBot = useCallback((enabled) => {
-    send({ type: 'toggle_telegram_bot', enabled });
-  }, [send]);
-
-  const testSmtp = useCallback((smtpConfig) => {
-    send({ type: 'test_smtp', smtpConfig });
   }, [send]);
 
   const sendAdminTyping = useCallback((targetId, isTyping) => {
@@ -691,20 +600,6 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
     };
   }, [connect]);
 
-  const resumeAI = useCallback((targetId) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'resume_ai', targetId }));
-    }
-    setSessionAiStatus(targetId, 'active');
-  }, [setSessionAiStatus]);
-
-  const pauseAI = useCallback((targetId) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'pause_ai', targetId }));
-    }
-    setSessionAiStatus(targetId, 'human_active');
-  }, [setSessionAiStatus]);
-
   return {
     connect,
     disconnect,
@@ -715,28 +610,9 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
     deleteMessage: deleteMessageCmd,
     deleteSession,
     deleteSystemMessages,
-    changePassword,
-    changeApiToken,
-    updateWebhook,
-    updateTimeSettings,
-    updateRealtimeTyping,
-    updateSystemLogs,
-    updateLanguage,
-    updateAllowedOrigins,
-    updateAnonymousOrigins,
-    updateRateLimit,
-    updateMessageLimits,
-    updateBusinessHours,
-    updateSmtp,
-    updateTelegramSettings,
-    updateTelegramBots,
-    toggleTelegramBot,
-    testSmtp,
     sendAdminTyping,
     updateUserInfoFromAdmin,
     searchChats,
     setSearchResultsHandler,
-    resumeAI,
-    pauseAI,
   };
 }

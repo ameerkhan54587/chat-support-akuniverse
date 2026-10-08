@@ -5,6 +5,7 @@ import { linkify } from '../utils/linkUtils';
 export function Message({ message, config, onDelete }) {
   const [showDelete, setShowDelete] = useState(false);
   const isClient = message.sender === 'client';
+  const label = message.sender === 'internal_team' || message.sender === 'support' ? 'Internal team' : (isClient ? 'Customer' : 'Support');
 
   const renderText = (text) => {
     const parts = linkify(text);
@@ -54,6 +55,7 @@ export function Message({ message, config, onDelete }) {
               : 'bg-blue-500 text-white rounded-br-md'
           }`}
         >
+          <div className={`mb-1 text-[10px] font-semibold uppercase tracking-wide ${isClient ? 'text-gray-400' : 'text-blue-100'}`}>{label}</div>
           <div className="whitespace-pre-wrap">{renderText(message.text)}</div>
         </div>
 

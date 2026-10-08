@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useReducer, useCallback } from 'react';
 
 const ChatContext = createContext(null);
@@ -43,8 +44,6 @@ const initialState = {
   notifications: {},
   hasMoreMessages: false,
   loadingMoreMessages: false,
-  aiSuggestions: {}, // { [userId]: { suggestion, confidence, siteId, siteName, reason, summary, timestamp } }
-  sessionAiStatuses: {}, // { [userId]: 'active' | 'human_active' | 'escalated' }
 };
 
 function chatReducer(state, action) {
@@ -229,32 +228,6 @@ function chatReducer(state, action) {
         },
       };
 
-    case 'SET_AI_SUGGESTION':
-      return {
-        ...state,
-        aiSuggestions: {
-          ...state.aiSuggestions,
-          [action.payload.targetId]: action.payload,
-        },
-      };
-
-    case 'CLEAR_AI_SUGGESTION':
-      return {
-        ...state,
-        aiSuggestions: Object.fromEntries(
-          Object.entries(state.aiSuggestions).filter(([id]) => id !== action.payload)
-        ),
-      };
-
-    case 'SET_SESSION_AI_STATUS':
-      return {
-        ...state,
-        sessionAiStatuses: {
-          ...state.sessionAiStatuses,
-          [action.payload.targetId]: action.payload.status,
-        },
-      };
-
     default:
       return state;
   }
@@ -339,18 +312,6 @@ export function ChatProvider({ children }) {
     dispatch({ type: 'SET_TAB_ACTIVE', payload: { userId, isActive } });
   }, []);
 
-  const setAiSuggestion = useCallback((payload) => {
-    dispatch({ type: 'SET_AI_SUGGESTION', payload });
-  }, []);
-
-  const clearAiSuggestion = useCallback((targetId) => {
-    dispatch({ type: 'CLEAR_AI_SUGGESTION', payload: targetId });
-  }, []);
-
-  const setSessionAiStatus = useCallback((targetId, status) => {
-    dispatch({ type: 'SET_SESSION_AI_STATUS', payload: { targetId, status } });
-  }, []);
-
   const value = {
     state,
     setAuthenticated,
@@ -372,9 +333,6 @@ export function ChatProvider({ children }) {
     clearNotification,
     setUserOnline,
     setTabActive,
-    setAiSuggestion,
-    clearAiSuggestion,
-    setSessionAiStatus,
   };
 
   return (

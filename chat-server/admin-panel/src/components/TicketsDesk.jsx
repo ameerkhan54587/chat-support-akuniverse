@@ -17,7 +17,6 @@ export function TicketsDesk({
     channel_type: 'software',
     priority: 'high',
     error_log: '',
-    ai_summary: { summary: '', reason: '' }
   });
 
   const handleCopyLog = (text) => {
@@ -61,10 +60,6 @@ export function TicketsDesk({
           channel_type: newTicket.channel_type,
           priority: newTicket.priority,
           error_log: newTicket.error_log,
-          ai_summary: {
-            summary: newTicket.subject,
-            reason: newTicket.error_log ? 'Manual crash submission' : 'Manual ticket creation'
-          }
         })
       });
       if (res.ok) {
@@ -75,8 +70,7 @@ export function TicketsDesk({
           channel_type: 'software',
           priority: 'high',
           error_log: '',
-          ai_summary: { summary: '', reason: '' }
-        });
+              });
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('new_ticket_event'));
         }
@@ -94,7 +88,7 @@ export function TicketsDesk({
         </div>
         <h2 className="text-xl font-bold text-gray-800 mb-1.5">Select a Ticket to View Details</h2>
         <p className="text-sm text-gray-500 max-w-md mb-6 leading-relaxed">
-          Tickets and bug reports appear in the left <strong>Chats / Tickets</strong> section with priority and site origin. Click any ticket to inspect error logs, AI diagnostics, and take action.
+          Tickets and bug reports appear in the left <strong>Chats / Tickets</strong> section with priority and site origin. Click a ticket to review its details and take action.
         </p>
         <div className="flex items-center gap-3">
           <button
@@ -218,10 +212,9 @@ export function TicketsDesk({
   const siteName = ticket.site_name || `Site #${ticket.site_id || 1}`;
   const priority = (ticket.priority || 'medium').toLowerCase();
   const channel = ticket.channel_type || 'widget';
-  const summaryObj = typeof ticket.ai_summary === 'object' && ticket.ai_summary !== null ? ticket.ai_summary : {};
-  const errorLog = summaryObj.error_log || summaryObj.traceback || '';
-  const aiSummary = summaryObj.summary || ticket.subject;
-  const aiReason = summaryObj.reason || '';
+  const errorLog = ticket.error_log || '';
+  const reportSummary = ticket.subject || '';
+  const reportReason = '';
 
   return (
     <div className="flex-1 flex flex-col bg-gray-50 h-full overflow-y-auto">
@@ -335,9 +328,9 @@ export function TicketsDesk({
                 <span className="text-xs font-mono text-slate-400 font-semibold pl-2">
                   Crash Traceback / Error Log
                 </span>
-                {summaryObj.version && (
+                {ticket.version && (
                   <span className="text-[10px] bg-slate-800 text-slate-300 px-1.5 py-0.2 rounded font-mono">
-                    v{summaryObj.version}
+                    v{ticket.version}
                   </span>
                 )}
               </div>
@@ -363,18 +356,18 @@ export function TicketsDesk({
           </div>
         ) : null}
 
-        {/* AI Diagnostics & Analysis Card */}
+        {/* Customer report */}
         <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-2xs space-y-3">
           <div className="flex items-center gap-2 text-indigo-700 font-bold text-sm">
-            <span>✨ AI Diagnostic Summary</span>
+            <span>✨ Customer report</span>
           </div>
           <div className="text-sm text-gray-800 leading-relaxed bg-indigo-50/50 rounded-xl p-3.5 border border-indigo-100">
-            {aiSummary}
+            {reportSummary}
           </div>
-          {aiReason && (
+          {reportReason && (
             <div className="text-xs text-gray-600 bg-gray-50 rounded-lg p-3 border border-gray-200">
               <span className="font-bold text-gray-700">Identified Reason / Root Cause: </span>
-              {aiReason}
+              {reportReason}
             </div>
           )}
         </div>
@@ -407,10 +400,10 @@ export function TicketsDesk({
               </div>
             )}
 
-            {summaryObj.user_id && (
+            {ticket.user_id && (
               <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
                 <div className="text-gray-400 font-semibold mb-1">Reported User ID</div>
-                <div className="font-mono text-gray-800">{summaryObj.user_id}</div>
+                <div className="font-mono text-gray-800">{ticket.user_id}</div>
               </div>
             )}
 
