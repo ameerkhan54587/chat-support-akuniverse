@@ -13,6 +13,8 @@ const event = {
     timestamp: '2026-10-08 16:03:20+00:00',
     username: 'ameer_khan07',
     display_name: 'Ameer',
+    first_name: 'Ameer',
+    last_name: 'Khan',
 };
 
 test('normalizes an external user message into the shared Telegram chat format', () => {
@@ -23,6 +25,9 @@ test('normalizes an external user message into the shared Telegram chat format',
     assert.equal(result.value.timestamp, '2026-10-08T16:03:20.000Z');
     assert.equal(result.value.metadata.site_id, 'smsotps');
     assert.equal(result.value.metadata.user_username, 'ameer_khan07');
+    assert.equal(result.value.metadata.user_name, 'Ameer Khan');
+    assert.equal(result.value.metadata.user_first_name, 'Ameer');
+    assert.equal(result.value.metadata.user_last_name, 'Khan');
 });
 
 test('maps AI and admin messages to console senders', () => {
@@ -61,4 +66,18 @@ test('rejects stale timestamps, malformed nonces, and missing secrets', () => {
     assert.equal(verifyExternalChatSignature({ rawBody, timestamp, nonce, signature, secret, nowSeconds: 1791500301 }).error, 'stale_timestamp');
     assert.equal(verifyExternalChatSignature({ rawBody, timestamp, nonce: 'bad', signature, secret, nowSeconds: 1791500000 }).error, 'invalid_nonce');
     assert.equal(verifyExternalChatSignature({ rawBody, timestamp, nonce, signature, secret: '', nowSeconds: 1791500000 }).error, 'signature_not_configured');
+});
+
+
+test('composes Telegram first and last name when only profile fields arrive', () => {
+    const { display_name: _displayName, ...withoutDisplayName } = event;
+    const result = normalizeExternalChatEvent({ ...withoutDisplayName, first_name: 'Ameer', last_name: 'Khan' });
+    assert.equal(result.value.displayName, 'Ameer Khan');
+    assert.equal(result.value.metadata.user_name, 'Ameer Khan');
+});
+
+test('falls back from Telegram profile name to username and strips leading at sign', () => {
+    const result = normalizeExternalChatEvent({ ...event, display_name: '', first_name: '', last_name: '', username: '@ameer_khan07' });
+    assert.equal(result.value.metadata.user_name, 'ameer_khan07');
+    assert.equal(result.value.username, 'ameer_khan07');
 });

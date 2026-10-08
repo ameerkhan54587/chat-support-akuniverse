@@ -1252,7 +1252,7 @@ app.post('/api/telegram/ingest', requireTicketAuth, verifyExternalChatAuth, secu
         if (event.sender === 'client') {
             broadcastToAdmins({ type: 'client_msg', from: event.sessionId, text: event.text, info, timestamp: event.timestamp, id: messageId });
         } else {
-            broadcastToAdmins({ type: 'api_msg_sent', targetId: event.sessionId, text: event.text, timestamp: event.timestamp, id: messageId });
+            broadcastToAdmins({ type: 'api_msg_sent', targetId: event.sessionId, text: event.text, sender: event.sender, info, timestamp: event.timestamp, id: messageId });
         }
         return res.status(201).json({ success: true, duplicate: false, session_id: event.sessionId, message_id: messageId });
     } catch (error) {
@@ -1797,7 +1797,7 @@ wss.on('connection', (ws, req) => {
                                 const timestamp = new Date().toISOString();
                                 saveMessage(targetId, 'internal_team', text, timestamp, (newId) => {
                                     sendToUserTabs(targetId, { text, sender: 'internal_team', timestamp, id: newId });
-                                    broadcastToAdmins({ type: 'admin_msg_sent', targetId, text, timestamp, id: newId });
+                                    broadcastToAdmins({ type: 'admin_msg_sent', targetId, text, sender: 'internal_team', timestamp, id: newId });
                                 });
                             }).catch((error) => {
                                 console.warn(`[Admin reply] ${String(error?.message || 'unknown').slice(0, 160)}`);

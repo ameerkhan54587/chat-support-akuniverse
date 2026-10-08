@@ -212,18 +212,20 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
 
       case 'api_msg_sent':
       case 'admin_msg_sent':
+        if (data.info) updateUserInfo(data.targetId, data.info);
+        const outboundSender = data.sender || (data.type === 'admin_msg_sent' ? 'internal_team' : 'support');
         if (data.targetId === activeUserIdRef.current) {
           addMessage({
             id: data.id,
             userId: data.targetId,
-            sender: 'support',
+            sender: outboundSender,
             text: data.text,
             timestamp: data.timestamp,
           });
         } else {
           // Update lastMessage for non-active user (e.g. API-sent messages)
           updateUserInfo(data.targetId, {
-            lastMessage: { text: data.text, timestamp: data.timestamp, sender: 'support' },
+            lastMessage: { text: data.text, timestamp: data.timestamp, sender: outboundSender },
           });
         }
         break;

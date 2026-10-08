@@ -25,8 +25,12 @@ function normalizeExternalChatEvent(body = {}) {
         return { error: 'invalid_timestamp' };
     }
 
-    const username = typeof body.username === 'string' ? body.username.trim().slice(0, 64) : '';
+    const username = typeof body.username === 'string' ? body.username.trim().replace(/^@/, '').slice(0, 64) : '';
+    const firstName = typeof body.first_name === 'string' ? body.first_name.trim().slice(0, 100) : '';
+    const lastName = typeof body.last_name === 'string' ? body.last_name.trim().slice(0, 100) : '';
     const displayName = typeof body.display_name === 'string' ? body.display_name.trim().slice(0, 100) : '';
+    const fullName = [firstName, lastName].filter(Boolean).join(' ').trim().slice(0, 100);
+    const bestName = fullName || displayName || username || `Telegram user ${chatId}`;
     const sessionId = `telegram:site_${siteId}:${chatId}`;
     const createdAt = new Date(timestamp).toISOString();
     return {
@@ -40,9 +44,13 @@ function normalizeExternalChatEvent(body = {}) {
             timestamp: createdAt,
             sessionId,
             username,
-            displayName,
+            displayName: bestName,
+            firstName,
+            lastName,
             metadata: {
-                user_name: displayName || username || `Telegram user ${chatId}`,
+                user_name: bestName,
+                user_first_name: firstName,
+                user_last_name: lastName,
                 user_id: chatId,
                 user_username: username,
                 source: 'telegram',
