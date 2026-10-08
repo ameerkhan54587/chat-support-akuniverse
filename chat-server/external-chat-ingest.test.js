@@ -1,0 +1,63 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { normalizeExternalChatEvent, signExternalChatRequest, verifyExternalChatSignature } = require('./external-chat-ingest');
+
+const event = {
+    site_id: 'smsotps',
+    chat_id: '8975496349',
+    source_event_id: 'support_messages:42',
+    direction: 'user',
+    text: 'Help please',
+    timestamp: '2026-10-08 16:03:20+00:00',
+    username: 'ameer_khan07',
+    display_name: 'Ameer',
+};
+
+test('normalizes an external user message into the shared Telegram chat format', () => {
+    const result = normalizeExternalChatEvent(event);
+    assert.equal(result.error, undefined);
+    assert.equal(result.value.sessionId, 'telegram:site_smsotps:8975496349');
+    assert.equal(result.value.sender, 'client');
+    assert.equal(result.value.timestamp, '2026-10-08T16:03:20.000Z');
+    assert.equal(result.value.metadata.site_id, 'smsotps');
+    assert.equal(result.value.metadata.user_username, 'ameer_khan07');
+});
+
+test('maps AI and admin messages to console senders', () => {
+    assert.equal(normalizeExternalChatEvent({ ...event, direction: 'ai' }).value.sender, 'support');
+    assert.equal(normalizeExternalChatEvent({ ...event, direction: 'admin' }).value.sender, 'internal_team');
+});
+
+test('rejects notice and invalid input', () => {
+    assert.equal(normalizeExternalChatEvent({ ...event, direction: 'notice' }).error, 'invalid_direction');
+    assert.equal(normalizeExternalChatEvent({ ...event, source_event_id: '' }).error, 'invalid_source_event_id');
+    assert.equal(normalizeExternalChatEvent({ ...event, chat_id: 'not-numeric' }).error, 'invalid_chat_id');
+    assert.equal(normalizeExternalChatEvent({ ...event, timestamp: 'yesterday' }).error, 'invalid_timestamp');
+    assert.equal(normalizeExternalChatEvent({ ...event, text: '   ' }).error, 'invalid_text');
+});
+
+
+test('verifies HMAC over exact raw bytes, timestamp, and nonce', () => {
+    const rawBody = Buffer.from('{"x":1}\n');
+    const timestamp = '1791500000';
+    const nonce = 'nonce_0123456789abcdef';
+    const secret = 'test-secret';
+    const signature = signExternalChatRequest(rawBody, timestamp, nonce, secret);
+    const verified = verifyExternalChatSignature({ rawBody, timestamp, nonce, signature, secret, nowSeconds: 1791500000 });
+    assert.deepEqual(verified.value, { timestamp: 1791500000, nonce });
+    assert.equal(verifyExternalChatSignature({ rawBody: Buffer.from('{"x":1}'), timestamp, nonce, signature, secret, nowSeconds: 1791500000 }).error, 'invalid_signature');
+    assert.equal(verifyExternalChatSignature({ rawBody, timestamp, nonce, signature: '0'.repeat(64), secret, nowSeconds: 1791500000 }).error, 'invalid_signature');
+});
+
+test('rejects stale timestamps, malformed nonces, and missing secrets', () => {
+    const rawBody = Buffer.from('{}');
+    const timestamp = '1791500000';
+    const nonce = 'nonce_0123456789abcdef';
+    const secret = 'test-secret';
+    const signature = signExternalChatRequest(rawBody, timestamp, nonce, secret);
+    assert.equal(verifyExternalChatSignature({ rawBody, timestamp, nonce, signature, secret, nowSeconds: 1791500301 }).error, 'stale_timestamp');
+    assert.equal(verifyExternalChatSignature({ rawBody, timestamp, nonce: 'bad', signature, secret, nowSeconds: 1791500000 }).error, 'invalid_nonce');
+    assert.equal(verifyExternalChatSignature({ rawBody, timestamp, nonce, signature, secret: '', nowSeconds: 1791500000 }).error, 'signature_not_configured');
+});

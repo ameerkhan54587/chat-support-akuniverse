@@ -65,6 +65,22 @@ async function initDatabase(db) {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
 
+    await db.runAsync(`CREATE TABLE IF NOT EXISTS external_messages (
+        source TEXT NOT NULL,
+        source_message_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        message_id INTEGER,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (source, source_message_id)
+    )`);
+
+    await db.runAsync(`CREATE TABLE IF NOT EXISTS ingest_nonces (
+        source TEXT NOT NULL,
+        nonce TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (source, nonce)
+    )`);
+
     // Sites and ticket records retained for the support console.
     await db.runAsync(`CREATE TABLE IF NOT EXISTS sites (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

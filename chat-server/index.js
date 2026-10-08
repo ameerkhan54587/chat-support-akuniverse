@@ -8,6 +8,7 @@ const bcrypt = require('bcryptjs');
 const maxmind = require('maxmind');
 const nodemailer = require('nodemailer');
 const { pollTelegramBots } = require('./telegram-polling');
+const { normalizeExternalChatEvent, verifyExternalChatSignature } = require('./external-chat-ingest');
 
 // Anonymous name generator (deprecated - widget now asks for name via form)
 // const ANON_ADJECTIVES = [
@@ -275,6 +276,7 @@ initDatabase(db).then(() => {
 const security = require('./security');
 
 const app = express();
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 
 // Slowloris & Socket Exhaustion Hardening (DoS defense)
@@ -288,7 +290,9 @@ const wss = new WebSocket.Server({ server, maxPayload: 128 * 1024 });
 // HTTP Security Middlewares
 app.use(security.securityHeadersMiddleware);
 app.use(security.httpRateLimiter({ maxRequests: 200, windowMs: 60000 }));
-app.use(express.json({ limit: '256kb' }));
+app.use(express.json({ limit: '256kb', verify: (req, _res, body) => {
+    if (req.path === '/api/telegram/ingest') req.rawBody = Buffer.from(body);
+} }));
 app.use(express.urlencoded({ extended: false, limit: '256kb' }));
 
 // Serve React admin panel static files (excluding index.html which is handled by app.get('/'))
@@ -1167,6 +1171,94 @@ function requireTicketAuth(req, res, next) {
         checkSite();
     }
 }
+
+function verifyExternalChatAuth(req, res, next) {
+    const site = req.site;
+    const bearer = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || '');
+    if (!site || !site.id || !site.api_key || !bearer || req.isAdmin || bearer[1].trim() !== site.api_key) {
+        return res.status(401).json({ error: 'site_api_key_required' });
+    }
+    if (!req.secure) return res.status(400).json({ error: 'https_required' });
+
+    const suffix = String(site.id).toUpperCase().replace(/[^A-Z0-9]/g, '_');
+    const secret = process.env[`SITE_HMAC_SECRET_${suffix}`];
+    const verified = verifyExternalChatSignature({
+        rawBody: req.rawBody,
+        timestamp: req.headers['x-message-timestamp'],
+        nonce: req.headers['x-message-nonce'],
+        signature: req.headers['x-message-signature'],
+        secret,
+    });
+    if (verified.error) return res.status(401).json({ error: verified.error });
+    req.externalChatAuth = verified.value;
+    return next();
+}
+
+// Receive mirrored Telegram support messages from trusted site backends.
+app.post('/api/telegram/ingest', requireTicketAuth, verifyExternalChatAuth, security.sensitiveRateLimiter(120), async (req, res) => {
+    if (!req.site || !req.site.id) return res.status(401).json({ error: 'site_api_key_required' });
+    const normalized = normalizeExternalChatEvent(req.body);
+    if (normalized.error) return res.status(400).json({ error: normalized.error });
+
+    const event = normalized.value;
+    if (String(req.site.id).toLowerCase() !== event.siteId.toLowerCase()) {
+        return res.status(403).json({ error: 'site_id_mismatch' });
+    }
+
+    const source = `laravel:${event.siteId}`;
+    let transaction;
+    try {
+        transaction = await db.client.transaction('write');
+        await transaction.execute({ sql: "DELETE FROM ingest_nonces WHERE created_at < datetime('now', '-10 minutes')" });
+        const nonceReservation = await transaction.execute({
+            sql: 'INSERT OR IGNORE INTO ingest_nonces (source, nonce) VALUES (?, ?)',
+            args: [source, req.externalChatAuth.nonce],
+        });
+        if (!nonceReservation.rowsAffected) {
+            await transaction.rollback();
+            return res.status(409).json({ error: 'replayed_request' });
+        }
+
+        const reservation = await transaction.execute({
+            sql: 'INSERT OR IGNORE INTO external_messages (source, source_message_id, session_id) VALUES (?, ?, ?)',
+            args: [source, event.sourceEventId, event.sessionId],
+        });
+        if (!reservation.rowsAffected) {
+            await transaction.commit();
+            return res.json({ success: true, duplicate: true });
+        }
+
+        await transaction.execute({
+            sql: `INSERT INTO sessions (session_id, metadata, updated_at) VALUES (?, ?, ?)
+                  ON CONFLICT(session_id) DO UPDATE SET metadata = excluded.metadata, updated_at = excluded.updated_at`,
+            args: [event.sessionId, JSON.stringify(event.metadata), event.timestamp],
+        });
+        const inserted = await transaction.execute({
+            sql: 'INSERT INTO messages (session_id, sender, text, timestamp) VALUES (?, ?, ?, ?)',
+            args: [event.sessionId, event.sender, event.text, event.timestamp],
+        });
+        const messageId = Number(inserted.lastInsertRowid);
+        await transaction.execute({
+            sql: 'UPDATE external_messages SET message_id = ? WHERE source = ? AND source_message_id = ?',
+            args: [messageId, source, event.sourceEventId],
+        });
+        await transaction.commit();
+
+        const info = { ...event.metadata, lastMessage: { text: event.text, timestamp: event.timestamp, sender: event.sender } };
+        if (event.sender === 'client') {
+            broadcastToAdmins({ type: 'client_msg', from: event.sessionId, text: event.text, info, timestamp: event.timestamp, id: messageId });
+        } else {
+            broadcastToAdmins({ type: 'api_msg_sent', targetId: event.sessionId, text: event.text, timestamp: event.timestamp, id: messageId });
+        }
+        return res.status(201).json({ success: true, duplicate: false, session_id: event.sessionId, message_id: messageId });
+    } catch (error) {
+        if (transaction) await transaction.rollback().catch(() => {});
+        console.error(`[External chat ingest] ${error.message}`);
+        return res.status(500).json({ error: 'ingest_failed' });
+    } finally {
+        if (transaction) transaction.close();
+    }
+});
 
 // Sites Management (Powered by data/sites.json preset repository)
 app.post('/api/sites', requireAdminAuth, (_req, res) => {
