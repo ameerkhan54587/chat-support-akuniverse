@@ -15,6 +15,8 @@ function loadAllSites() {
           if (!site.id) site.id = path.basename(file, '.json');
           const envSuffix = String(site.id).toUpperCase().replace(/[^A-Z0-9]/g, '_');
           site.api_key = process.env[`SITE_API_KEY_${envSuffix}`] || '';
+          // Handoff credentials are runtime-only and never stored in site metadata.
+          site.handoff_secret = process.env[`SITE_HANDOFF_SECRET_${envSuffix}`] || '';
           if (site.telegram && typeof site.telegram === 'object') {
             const envKey = `TELEGRAM_BOT_TOKEN_${envSuffix}`;
             site.telegram.bot_token = process.env[envKey] || '';
