@@ -9,7 +9,7 @@ const maxmind = require('maxmind');
 const nodemailer = require('nodemailer');
 const { pollTelegramBots } = require('./telegram-polling');
 const { normalizeExternalChatEvent, verifyExternalChatSignature } = require('./external-chat-ingest');
-const { notifySiteHandoff } = require('./handoff-client');
+const { notifySiteHandoff, sendSiteReply } = require('./handoff-client');
 
 // Anonymous name generator (deprecated - widget now asks for name via form)
 // const ANON_ADJECTIVES = [
@@ -1766,35 +1766,42 @@ wss.on('connection', (ws, req) => {
                         }
 
                         if (data.type === 'admin_reply') {
-
-                            const timestamp = new Date().toISOString();
-                            saveMessage(data.targetId, 'internal_team', data.text, timestamp, (newId) => {
-                                sendToUserTabs(data.targetId, { text: data.text, sender: 'internal_team', timestamp: timestamp, id: newId });
-                                broadcastToAdmins({ type: 'admin_msg_sent', targetId: data.targetId, text: data.text, timestamp: timestamp, id: newId });
-
-                                if (data.targetId.startsWith('telegram:')) {
-                                    const metadata = clientInfo.get(data.targetId) || {};
-                                    const bot = getTelegramBot(metadata.telegram_bot_id);
-                                    const privateChatId = data.targetId.split(':').slice(-1)[0];
-                                    callTelegramApi('sendMessage', {
-                                        chat_id: privateChatId,
-                                        text: data.text,
-                                    }, bot)
-                                        .then(async () => {
-                                            if (!bot?.siteId || !bot.handoff_secret) return;
-                                            const result = await notifySiteHandoff({
-                                                siteId: bot.siteId,
-                                                secret: bot.handoff_secret,
-                                                apiKey: bot.api_key,
-                                                chatId: privateChatId,
-                                            });
-                                            if (result.error) console.warn(`[Handoff] Site ${bot.siteId}: ${result.error}${result.status ? ` (${result.status})` : ''}`);
-                                        })
-                                        .catch((error) => {
-                                            console.warn(`[Handoff] Site ${bot?.siteId || 'unknown'} signal failed: ${String(error?.message || 'unknown').slice(0, 160)}`);
-                                            broadcastToAdmins({ type: 'system', text: `Telegram error: ${error.message}` });
-                                        });
+                            const targetId = String(data.targetId || '');
+                            const text = typeof data.text === 'string' ? data.text.trim() : '';
+                            if (!text || text.length > 4000) {
+                                ws.send(JSON.stringify({ type: 'system', text: 'Reply must be between 1 and 4000 characters.' }));
+                                return;
+                            }
+                            const sendResult = async () => {
+                                if (!targetId.startsWith('telegram:')) return { success: true };
+                                const match = /^telegram:site_([a-z0-9_-]{1,64}):(-?\d{1,32})$/i.exec(targetId);
+                                if (!match) throw new Error('Invalid Telegram chat target.');
+                                const siteId = match[1].toLowerCase();
+                                const chatId = match[2];
+                                const metadata = clientInfo.get(targetId) || {};
+                                const bot = getTelegramBot(metadata.telegram_bot_id || `site_${siteId}`);
+                                if (siteId === 'smsotps') {
+                                    const site = configLoader.getSiteById(siteId);
+                                    const result = await sendSiteReply({ siteId, secret: site?.handoff_secret, apiKey: site?.api_key, chatId, text });
+                                    if (!result.success) throw new Error(result.error === 'site_rejected' ? `SMSOTPS rejected reply (${result.status}).` : 'SMSOTPS reply endpoint is not configured or unavailable.');
+                                    return result;
                                 }
+                                await callTelegramApi('sendMessage', { chat_id: chatId, text }, bot);
+                                if (bot?.siteId && bot.handoff_secret) {
+                                    const result = await notifySiteHandoff({ siteId: bot.siteId, secret: bot.handoff_secret, apiKey: bot.api_key, chatId });
+                                    if (result.error) console.warn(`[Handoff] Site ${bot.siteId}: ${result.error}${result.status ? ` (${result.status})` : ''}`);
+                                }
+                                return { success: true };
+                            };
+                            sendResult().then(() => {
+                                const timestamp = new Date().toISOString();
+                                saveMessage(targetId, 'internal_team', text, timestamp, (newId) => {
+                                    sendToUserTabs(targetId, { text, sender: 'internal_team', timestamp, id: newId });
+                                    broadcastToAdmins({ type: 'admin_msg_sent', targetId, text, timestamp, id: newId });
+                                });
+                            }).catch((error) => {
+                                console.warn(`[Admin reply] ${String(error?.message || 'unknown').slice(0, 160)}`);
+                                ws.send(JSON.stringify({ type: 'system', text: `Reply failed: ${String(error?.message || 'unknown').slice(0, 160)}` }));
                             });
                         }
 

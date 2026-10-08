@@ -5,7 +5,7 @@ import { linkify } from '../utils/linkUtils';
 export function Message({ message, config, onDelete }) {
   const [showDelete, setShowDelete] = useState(false);
   const isClient = message.sender === 'client';
-  const label = message.sender === 'internal_team' || message.sender === 'support' ? 'Internal team' : (isClient ? 'Customer' : 'Support');
+  const label = message.sender === 'internal_team' ? 'Internal team' : message.sender === 'support' ? 'AI support' : (isClient ? 'Customer' : 'Support');
 
   const renderText = (text) => {
     const parts = linkify(text);

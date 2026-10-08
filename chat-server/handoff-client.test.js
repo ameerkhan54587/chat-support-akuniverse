@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
-const { HANDOFF_ENDPOINTS, createHandoffRequest, notifySiteHandoff, signSiteHandoffRequest, verifySiteHandoffSignature } = require('./handoff-client');
+const { HANDOFF_ENDPOINTS, REPLY_ENDPOINTS, createHandoffRequest, notifySiteHandoff, createSiteReplyRequest, sendSiteReply, signSiteHandoffRequest, verifySiteHandoffSignature } = require('./handoff-client');
 
 test('signs SMSOTPS handoff to its fixed URL with exact raw JSON', () => {
     const result = createHandoffRequest({ siteId: 'smsotps', secret: 'test-secret', chatId: '-100123', nowSeconds: 1791482400 });
@@ -39,4 +39,26 @@ test('verifies matching site handoff signature and rejects stale or tampered req
     assert.deepEqual(verifySiteHandoffSignature({ rawBody: body, timestamp, signature, secret: 'site-secret', nowSeconds: 1791482400 }), { value: { timestamp: 1791482400 } });
     assert.equal(verifySiteHandoffSignature({ rawBody: body, timestamp, signature, secret: 'site-secret', nowSeconds: 1791483001 }).error, 'stale_timestamp');
     assert.equal(verifySiteHandoffSignature({ rawBody: Buffer.from('{}'), timestamp, signature, secret: 'site-secret', nowSeconds: 1791482400 }).error, 'invalid_signature');
+});
+
+
+test('creates a fixed signed SMSOTPS reply request without bearer secrets', () => {
+    const request = createSiteReplyRequest({ siteId: 'smsotps', secret: 'test-secret', chatId: '8975496349', text: 'hello', nowSeconds: 1791482400 });
+    assert.equal(request.endpoint, REPLY_ENDPOINTS.smsotps);
+    assert.equal(request.body, JSON.stringify({ chat_id: '8975496349', text: 'hello' }));
+    assert.equal(request.headers.Authorization, undefined);
+    assert.equal(request.headers['X-Handoff-Signature'], signSiteHandoffRequest(Buffer.from(request.body), '1791482400', 'test-secret'));
+    assert.equal(request.headers['X-Message-Signature'], undefined);
+    assert.deepEqual(createSiteReplyRequest({ siteId: 'attacker.invalid', secret: 's', chatId: '1', text: 'hi' }), { skipped: true, reason: 'site_reply_not_configured' });
+    assert.equal(createSiteReplyRequest({ siteId: 'smsotps', secret: 's', chatId: 'bad', text: 'hi' }).error, 'invalid_chat_id');
+    assert.equal(createSiteReplyRequest({ siteId: 'smsotps', secret: 's', chatId: '1', text: ' ' }).error, 'invalid_text');
+});
+
+test('sends signed site reply and only reports success from the site', async () => {
+    let sent;
+    const result = await sendSiteReply({ siteId: 'smsotps', secret: 's', chatId: '1', text: 'hi', nowSeconds: 1791482400 }, async (url, options) => { sent = { url, options }; return { ok: true, status: 200 }; });
+    assert.deepEqual(result, { success: true, status: 200 });
+    assert.equal(sent.url, REPLY_ENDPOINTS.smsotps);
+    assert.equal(sent.options.method, 'POST');
+    assert.equal(sent.options.body, JSON.stringify({ chat_id: '1', text: 'hi' }));
 });

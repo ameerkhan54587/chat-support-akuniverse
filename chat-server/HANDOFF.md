@@ -15,3 +15,6 @@ Set secrets only in the deployment environment and the site's `.env`, from the v
 - Console Render `SITE_HANDOFF_SECRET_SMSACTIVATE` matches SMS Activate `.env` `HANDOFF_SECRET`.
 
 Do not put either secret in this repository, site JSON, logs, or chat. The Console site bearer API key remains its existing `SITE_API_KEY_<SITE>` key.
+
+## SMSOTPS operator replies
+For SMSOTPS, the Console sends replies to the fixed `https://api.smsotps.com/api/support/reply` endpoint, signed with the same `SITE_HANDOFF_SECRET_SMSOTPS` / Laravel `HANDOFF_SECRET` pair. Laravel sends via its existing Telegram bot and sets the five-minute handoff only after Telegram confirms delivery. The Console no longer needs the SMSOTPS Telegram bot token for sending replies. Other Telegram integrations retain their own direct send path.

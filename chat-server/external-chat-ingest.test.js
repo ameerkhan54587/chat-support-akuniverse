@@ -28,6 +28,7 @@ test('normalizes an external user message into the shared Telegram chat format',
 test('maps AI and admin messages to console senders', () => {
     assert.equal(normalizeExternalChatEvent({ ...event, direction: 'ai' }).value.sender, 'support');
     assert.equal(normalizeExternalChatEvent({ ...event, direction: 'admin' }).value.sender, 'internal_team');
+    assert.equal(normalizeExternalChatEvent({ ...event, direction: 'ai' }).value.sender, 'support');
 });
 
 test('rejects notice and invalid input', () => {
