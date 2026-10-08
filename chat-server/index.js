@@ -9,6 +9,7 @@ const maxmind = require('maxmind');
 const nodemailer = require('nodemailer');
 const { pollTelegramBots } = require('./telegram-polling');
 const { normalizeExternalChatEvent, verifyExternalChatSignature } = require('./external-chat-ingest');
+const { notifySiteHandoff } = require('./handoff-client');
 
 // Anonymous name generator (deprecated - widget now asks for name via form)
 // const ANON_ADJECTIVES = [
@@ -232,6 +233,9 @@ function syncSiteTelegramBots() {
             botToken: s.telegram.bot_token,
             chatId: s.telegram.chat_id || '',
             siteId: s.id,
+            api_key: s.api_key,
+            handoff_secret: s.handoff_secret,
+            domain: s.domain,
             enabled: true,
             lastUpdateId: 0,
         }));
@@ -1776,7 +1780,18 @@ wss.on('connection', (ws, req) => {
                                         chat_id: privateChatId,
                                         text: data.text,
                                     }, bot)
+                                        .then(async () => {
+                                            if (!bot?.siteId || !bot.handoff_secret) return;
+                                            const result = await notifySiteHandoff({
+                                                siteId: bot.siteId,
+                                                secret: bot.handoff_secret,
+                                                apiKey: bot.api_key,
+                                                chatId: privateChatId,
+                                            });
+                                            if (result.error) console.warn(`[Handoff] Site ${bot.siteId}: ${result.error}${result.status ? ` (${result.status})` : ''}`);
+                                        })
                                         .catch((error) => {
+                                            console.warn(`[Handoff] Site ${bot?.siteId || 'unknown'} signal failed: ${String(error?.message || 'unknown').slice(0, 160)}`);
                                             broadcastToAdmins({ type: 'system', text: `Telegram error: ${error.message}` });
                                         });
                                 }
