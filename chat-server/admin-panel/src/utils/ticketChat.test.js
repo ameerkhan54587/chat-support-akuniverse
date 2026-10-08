@@ -80,3 +80,11 @@ test('exposes separate top-level brand tabs and filters each tab to its own chat
   assert.deepEqual(conversationsForBrand(users, info, 'brand:smsotps'), [users[2]]);
   assert.equal(brandTabForConversation(users[1], info[users[1]]), 'brand:smsactivate');
 });
+
+
+test('resolves legacy Telegram chats from site-prefixed session IDs when metadata is absent', () => {
+  const users = ['telegram:site_smsotps:12345', 'telegram:site_smsactivate:23456', 'telegram:site_fbverse_bot:34567'];
+  assert.deepEqual(conversationsForBrand(users, {}, 'brand:smsotps'), [users[0]]);
+  assert.deepEqual(conversationsForBrand(users, {}, 'brand:smsactivate'), [users[1]]);
+  assert.deepEqual(conversationsForBrand(users, {}, 'brand:fbverse_bot'), [users[2]]);
+});

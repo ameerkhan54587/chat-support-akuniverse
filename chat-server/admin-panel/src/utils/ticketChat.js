@@ -41,7 +41,8 @@ const SITE_LABELS = {
 export function getConversationBrand(userId, info = {}) {
   const explicitId = info.site_id || info.siteId || info.telegram_site_id || '';
   const nameText = [info.telegram_bot_name, info.bot_name, info.site_name, info.site].filter(Boolean).join(' ').toLowerCase();
-  const botText = [info.telegram_bot_id, info.telegram_bot_name].filter(Boolean).join(' ').toLowerCase();
+  const sessionBotId = String(userId || '').match(/^telegram:([^:]+):/)?.[1] || '';
+  const botText = [info.telegram_bot_id, info.telegram_bot_name, sessionBotId].filter(Boolean).join(' ').toLowerCase();
   const normalizedId = String(explicitId).toLowerCase().replace(/^site_/, '');
 
   if (normalizedId && SITE_LABELS[normalizedId]) return SITE_LABELS[normalizedId];
