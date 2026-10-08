@@ -50,11 +50,11 @@ async function notifySiteHandoff(options, fetchImpl = globalThis.fetch) {
 function createSiteReplyRequest({ siteId, secret, chatId, text, nowSeconds = Math.floor(Date.now() / 1000) }) {
     const endpoint = REPLY_ENDPOINTS[String(siteId || '').toLowerCase()];
     if (!endpoint || !secret) return { skipped: true, reason: 'site_reply_not_configured' };
-    const normalizedChatId = String(chatId || '').trim();
+    const normalizedChatId = String(chatId ?? '').trim();
     if (!/^-?\d{1,32}$/.test(normalizedChatId)) return { error: 'invalid_chat_id' };
     if (typeof text !== 'string' || !text.trim() || text.length > 4000) return { error: 'invalid_text' };
     const timestamp = String(nowSeconds);
-    const body = JSON.stringify({ chat_id: normalizedChatId, text });
+    const body = JSON.stringify({ chat_id: String(normalizedChatId), text });
     const signature = crypto.createHmac('sha256', secret).update(timestamp).update('.').update(body).digest('hex');
     return { endpoint, body, headers: { 'Content-Type': 'application/json', 'X-Handoff-Timestamp': timestamp, 'X-Handoff-Signature': signature } };
 }
