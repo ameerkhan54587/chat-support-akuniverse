@@ -5,8 +5,8 @@
   "scripts": {
     "start": "node index.js",
     "build": "npm --prefix admin-panel install --include=dev && npm --prefix admin-panel run build",
-    "test": "node test-ai-system.js",
-    "migrate:turso": "node migrate-sqlite-to-turso.js"
+    "migrate:turso": "node migrate-sqlite-to-turso.js",
+    "test:db": "node test-db-adapter.js"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",

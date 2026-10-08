@@ -1,25 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Modal } from './Modal';
 
 export function SitesManager({ isOpen, onClose, apiToken }) {
   const [sites, setSites] = useState([]);
   const [selectedSiteId, setSelectedSiteId] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
-  const [serverHost, setServerHost] = useState('');
+  const [serverHost] = useState(() => typeof window !== 'undefined' ? window.location.origin : '');
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setServerHost(window.location.origin);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (isOpen) {
-      fetchSites();
-    }
-  }, [isOpen, apiToken]);
-
-  const fetchSites = async () => {
+  const fetchSites = useCallback(async () => {
     try {
       const response = await fetch('/api/sites', {
         headers: { Authorization: `Bearer ${apiToken}` }
@@ -34,7 +22,16 @@ export function SitesManager({ isOpen, onClose, apiToken }) {
     } catch (err) {
       console.error('Error fetching sites:', err);
     }
-  };
+  }, [apiToken, selectedSiteId]);
+
+  useEffect(() => {
+    if (isOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      fetchSites();
+    }
+  }, [isOpen, fetchSites]);
+
+
 
   const copyToClipboard = (text, id) => {
     navigator.clipboard.writeText(text);
@@ -50,27 +47,6 @@ export function SitesManager({ isOpen, onClose, apiToken }) {
 
   const scriptUrl = `${serverHost || 'https://your-domain.com'}/widget.js`;
 
-  // Helper: resolve AI reply status for a given channel
-  const getChannelAiReply = (site, channel) => {
-    if (!site) return true;
-    const ch = channel.toLowerCase();
-    // 1. Direct key: telegram_ai_reply, widget_ai_reply, email_ai_reply
-    if (site[`${ch}_ai_reply`] !== undefined) return Boolean(site[`${ch}_ai_reply`]);
-    if (site[`ai_reply_${ch}`] !== undefined) return Boolean(site[`ai_reply_${ch}`]);
-    // 2. Object: ai_reply: { widget: true, telegram: false }
-    if (site.ai_reply && typeof site.ai_reply === 'object' && site.ai_reply[ch] !== undefined) {
-      return Boolean(site.ai_reply[ch]);
-    }
-    // 3. ai_replies object
-    if (site.ai_replies && typeof site.ai_replies === 'object' && site.ai_replies[ch] !== undefined) {
-      return Boolean(site.ai_replies[ch]);
-    }
-    // 4. Master switch fallback
-    if (typeof site.ai_reply === 'boolean') return site.ai_reply;
-    if (site.ai_reply !== undefined) return site.ai_reply !== false;
-    return true;
-  };
-
   const getEmbedCode = (site) => {
     return `<!-- Chat Support by AKUniverse - Widget for ${site.name} -->
 <script>
@@ -81,13 +57,15 @@ export function SitesManager({ isOpen, onClose, apiToken }) {
       site_id: "${site.id}",
       user_name: "Customer Name",       // Optional: pass logged-in user's name
       user_email: "customer@example.com" // Optional: pass logged-in user's email
-    }
+    },
+    telegramHandoff: true,
+    telegramUsername: "${site.telegram_username || ''}"
   };
 </script>
 <script src="${scriptUrl}" async></script>`;
   };
 
-  const simpleScriptTag = `<script src="${scriptUrl}" data-site="${selectedSite?.id || 'default'}" async></script>`;
+  const simpleScriptTag = `<script src="${scriptUrl}" data-site="${selectedSite?.id || 'default'}" data-telegram-handoff="true" data-telegram-username="${selectedSite?.telegram_username || ''}" async></script>`;
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="📖 Widget Integration & Setup Docs" size="3xl">
@@ -100,11 +78,11 @@ export function SitesManager({ isOpen, onClose, apiToken }) {
               Code-Driven Setup (No manual UI configuration needed)
             </p>
             <p className="text-blue-800 leading-relaxed">
-              Telegram bots, Email SMTP, AI instructions, and site rules are loaded directly from the code preset files in{' '}
+              Telegram bots, Email SMTP, and site rules are loaded directly from the code preset files in{' '}
               <code className="bg-blue-100/80 px-1.5 py-0.5 rounded font-mono text-[11px] font-semibold">
                 chat-server/data/sites/*.json
               </code>
-              . To embed live chat on your websites, simply use the widget links and script tags below.
+              . The site API keys and Telegram bot tokens are supplied through environment variables, not stored in preset files. The website widget opens the site's Telegram support bot.
             </p>
           </div>
         </div>
@@ -156,36 +134,6 @@ export function SitesManager({ isOpen, onClose, apiToken }) {
                   </h4>
                   <span className="text-[11px] bg-emerald-50 text-emerald-700 font-semibold px-2 py-0.5 rounded border border-emerald-200">
                     ✓ Active in Code
-                  </span>
-                  <span
-                    className={`text-[11px] font-semibold px-2 py-0.5 rounded border flex items-center gap-1 ${
-                      getChannelAiReply(selectedSite, 'widget')
-                        ? 'bg-blue-50 text-blue-700 border-blue-200'
-                        : 'bg-rose-50 text-rose-700 border-rose-200'
-                    }`}
-                    title={`Widget AI: ${getChannelAiReply(selectedSite, 'widget') ? 'ON' : 'OFF'}`}
-                  >
-                    🌐 Widget AI: {getChannelAiReply(selectedSite, 'widget') ? 'ON' : 'OFF'}
-                  </span>
-                  <span
-                    className={`text-[11px] font-semibold px-2 py-0.5 rounded border flex items-center gap-1 ${
-                      getChannelAiReply(selectedSite, 'telegram')
-                        ? 'bg-blue-50 text-blue-700 border-blue-200'
-                        : 'bg-rose-50 text-rose-700 border-rose-200'
-                    }`}
-                    title={`Telegram AI: ${getChannelAiReply(selectedSite, 'telegram') ? 'ON' : 'OFF'}`}
-                  >
-                    ✈️ Telegram AI: {getChannelAiReply(selectedSite, 'telegram') ? 'ON' : 'OFF'}
-                  </span>
-                  <span
-                    className={`text-[11px] font-semibold px-2 py-0.5 rounded border flex items-center gap-1 ${
-                      getChannelAiReply(selectedSite, 'email')
-                        ? 'bg-blue-50 text-blue-700 border-blue-200'
-                        : 'bg-rose-50 text-rose-700 border-rose-200'
-                    }`}
-                    title={`Email AI: ${getChannelAiReply(selectedSite, 'email') ? 'ON' : 'OFF'}`}
-                  >
-                    ✉️ Email AI: {getChannelAiReply(selectedSite, 'email') ? 'ON' : 'OFF'}
                   </span>
                 </div>
                 <p className="text-xs text-gray-500 mt-0.5">
@@ -278,8 +226,7 @@ export function SitesManager({ isOpen, onClose, apiToken }) {
                 </span>
               </div>
               <p className="text-xs text-gray-500">
-                Desktop software, bots, and background Python scripts authenticate using this site's secret{' '}
-                <code className="bg-gray-100 px-1 py-0.5 rounded text-gray-700 font-semibold">api_key</code>.
+                Desktop software, bots, and background Python scripts authenticate with this site's API key, stored in the deployment environment.
               </p>
 
               {/* API Key Box */}
@@ -289,18 +236,10 @@ export function SitesManager({ isOpen, onClose, apiToken }) {
                     Site Secret API Key:
                   </span>
                   <span className="font-mono text-xs text-purple-800 font-bold break-all">
-                    {selectedSite.api_key || 'Configured in data/sites/' + selectedSite.id + '.json'}
+                    {`Set in deployment environment: SITE_API_KEY_${selectedSite.id.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`}
                   </span>
                 </div>
-                {selectedSite.api_key && (
-                  <button
-                    type="button"
-                    onClick={() => copyToClipboard(selectedSite.api_key, 'key')}
-                    className="px-2.5 py-1 text-xs font-semibold bg-purple-600 text-white hover:bg-purple-700 rounded-lg transition flex-shrink-0 flex items-center gap-1 shadow-xs"
-                  >
-                    {copiedId === 'key' ? '✓ Copied Key!' : '📋 Copy API Key'}
-                  </button>
-                )}
+
               </div>
 
               {/* Python Snippet */}
@@ -318,7 +257,7 @@ export function SitesManager({ isOpen, onClose, apiToken }) {
 def report_software_bug(error_title, error_traceback, user_id=None):
     url = "${serverHost || 'https://your-domain.com'}/api/tickets"
     headers = {
-        "Authorization": "Bearer ${selectedSite.api_key || 'YOUR_SITE_API_KEY'}",
+        "Authorization": "Bearer YOUR_SITE_API_KEY",
         "Content-Type": "application/json"
     }
     payload = {
@@ -351,7 +290,7 @@ import requests
 
 response = requests.post(
     "${serverHost || 'https://your-domain.com'}/api/tickets",
-    headers={"Authorization": "Bearer ${selectedSite.api_key || 'YOUR_SITE_API_KEY'}"},
+    headers={"Authorization": "Bearer YOUR_SITE_API_KEY"},
     json={
         "site_id": "${selectedSite.id}",
         "channel_type": "software",
@@ -368,9 +307,9 @@ response = requests.post(
             {/* Backend Configuration Summary */}
             <div className="pt-2 border-t border-gray-100 grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
               <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-100">
-                <span className="font-semibold text-gray-800 block">✈️ Telegram Bots</span>
+                <span className="font-semibold text-gray-800 block">✈️ Telegram Handoff</span>
                 <span className="text-gray-500 text-[11px]">
-                  Managed in code presets: <code className="text-blue-700">data/sites/{selectedSite.id}.json</code>
+                  {selectedSite.telegram_username ? `Widget opens @${selectedSite.telegram_username}` : 'No Telegram support bot is enabled for this site.'}
                 </span>
               </div>
               <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-100">
@@ -379,21 +318,7 @@ response = requests.post(
                   Configured via server SMTP and routed automatically.
                 </span>
               </div>
-              <div className="bg-gray-50 p-2.5 rounded-lg border border-gray-100">
-                <span className="font-semibold text-gray-800 block mb-1">🤖 AI Reply Control</span>
-                <div className="flex flex-col gap-0.5 text-[11px]">
-                  <span>
-                    🌐 Widget: <span className={getChannelAiReply(selectedSite, 'widget') ? 'text-emerald-600 font-semibold' : 'text-rose-600 font-semibold'}>{getChannelAiReply(selectedSite, 'widget') ? 'ON' : 'OFF'}</span>
-                  </span>
-                  <span>
-                    ✈️ Telegram: <span className={getChannelAiReply(selectedSite, 'telegram') ? 'text-emerald-600 font-semibold' : 'text-rose-600 font-semibold'}>{getChannelAiReply(selectedSite, 'telegram') ? 'ON' : 'OFF'}</span>
-                  </span>
-                  <span>
-                    ✉️ Email: <span className={getChannelAiReply(selectedSite, 'email') ? 'text-emerald-600 font-semibold' : 'text-rose-600 font-semibold'}>{getChannelAiReply(selectedSite, 'email') ? 'ON' : 'OFF'}</span>
-                  </span>
-                  <span className="text-gray-400 mt-0.5">Edit <code className="text-blue-700">data/sites/{selectedSite.id}.json</code></span>
-                </div>
-              </div>
+
             </div>
           </div>
         )}

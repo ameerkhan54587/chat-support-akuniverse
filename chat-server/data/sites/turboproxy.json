@@ -4,12 +4,6 @@
   "domain": "turboproxy.com",
   "site_type": "proxy",
   "status": "active",
-  "ai_reply": {
-    "widget": false,
-    "telegram": false,
-    "email": false
-  },
-  "api_key": "tprx_live_sec_1d83c7e9204b",
   "description": "High-speed HTTP and SOCKS5 residential & datacenter proxy solutions",
   "currency": "USD",
   "timezone": "America/New_York",
@@ -17,19 +11,7 @@
     "https://turboproxy.com",
     "https://*.turboproxy.com"
   ],
-  "ai_prompt": "SITE: TurboProxy\nYou are the dedicated customer support assistant for TurboProxy.\nTurboProxy provides premium residential, datacenter, and mobile proxies.\nHelp customers configure proxies (HTTP and SOCKS5), explain port configurations, IP whitelist authorization vs User:Pass authorization, and bandwidth management.\nStrictly use the TurboProxy Knowledge Base. Never discuss other sites.",
-  "escalation_keywords": [
-    "chargeback",
-    "lawsuit",
-    "talk to human",
-    "agent",
-    "refund dispute",
-    "scam"
-  ],
-  "confidence_threshold": 0.7,
-  "tone": "technical",
   "telegram": {
-    "bot_token": "",
     "chat_id": "",
     "enabled": false
   },

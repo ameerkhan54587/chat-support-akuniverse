@@ -3,7 +3,7 @@ import { useTranslation } from '../i18n';
 
 export function Login({ onLogin }) {
   const { t } = useTranslation();
-  const [username, setUsername] = useState('admin4353');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
@@ -15,7 +15,7 @@ export function Login({ onLogin }) {
 
     try {
       await onLogin(password, rememberMe);
-    } catch (err) {
+    } catch {
       setIsLoading(false);
     }
   };
@@ -44,7 +44,7 @@ export function Login({ onLogin }) {
               onChange={(e) => setUsername(e.target.value)}
               disabled={isLoading}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition disabled:bg-gray-100 disabled:cursor-not-allowed"
-              placeholder="admin4353"
+              placeholder={t('login.username')}
             />
           </div>
 

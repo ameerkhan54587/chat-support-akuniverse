@@ -1,7 +1,90 @@
+
+function renderTelegramHandoff(config, script) {
+    const data = script?.dataset || {};
+    const rawUsername = String(config.telegramUsername || data.telegramUsername || '').trim().replace(/^@/, '');
+    const validUsername = /^[A-Za-z0-9_]{5,32}$/.test(rawUsername);
+    const username = validUsername ? rawUsername : '';
+    const style = document.createElement('style');
+    style.textContent = `
+      #kaplia-widget-handoff { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      #kaplia-widget-handoff * { box-sizing: border-box; }
+      #kaplia-widget-handoff .k-handoff-toggle { position: fixed; right: 22px; bottom: 22px; width: 58px; height: 58px; border: 0; border-radius: 50%; background: #2563eb; color: #fff; font-size: 25px; cursor: pointer; box-shadow: 0 5px 18px #17255444; z-index: 99999; }
+      #kaplia-widget-handoff .k-handoff-panel { position: fixed; right: 22px; bottom: 92px; width: min(340px, calc(100vw - 32px)); padding: 20px; border-radius: 16px; background: #fff; color: #172033; box-shadow: 0 8px 32px #17255430; z-index: 99999; display: none; }
+      #kaplia-widget-handoff .k-handoff-panel[data-open="true"] { display: block; }
+      #kaplia-widget-handoff .k-handoff-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+      #kaplia-widget-handoff .k-handoff-title { font-size: 16px; font-weight: 700; }
+      #kaplia-widget-handoff .k-handoff-close { border: 0; background: transparent; color: #64748b; font-size: 22px; cursor: pointer; }
+      #kaplia-widget-handoff .k-handoff-copy { margin: 0 0 16px; color: #64748b; font-size: 13px; line-height: 1.5; }
+      #kaplia-widget-handoff .k-handoff-link { display: block; padding: 12px 15px; border-radius: 10px; background: #229ed9; color: #fff; text-align: center; text-decoration: none; font-size: 14px; font-weight: 700; }
+      #kaplia-widget-handoff .k-handoff-link:hover { background: #168ac1; }
+      #kaplia-widget-handoff .k-handoff-unavailable { padding: 11px 12px; border-radius: 9px; background: #f1f5f9; color: #475569; font-size: 13px; line-height: 1.5; }
+      @media (max-width: 480px) { #kaplia-widget-handoff .k-handoff-panel { right: 16px; bottom: 86px; } #kaplia-widget-handoff .k-handoff-toggle { right: 16px; bottom: 16px; } }
+    `;
+    document.head.appendChild(style);
+
+    const root = document.createElement('div');
+    root.id = 'kaplia-widget-handoff';
+    const button = document.createElement('button');
+    button.className = 'k-handoff-toggle';
+    button.type = 'button';
+    button.setAttribute('aria-label', 'Open Telegram support');
+    button.textContent = '✈';
+
+    const panel = document.createElement('section');
+    panel.className = 'k-handoff-panel';
+    panel.setAttribute('aria-label', 'Telegram support');
+    panel.setAttribute('data-open', 'false');
+    const header = document.createElement('div');
+    header.className = 'k-handoff-header';
+    const title = document.createElement('div');
+    title.className = 'k-handoff-title';
+    title.textContent = 'Chat with support';
+    const close = document.createElement('button');
+    close.className = 'k-handoff-close';
+    close.type = 'button';
+    close.setAttribute('aria-label', 'Close');
+    close.textContent = '×';
+    header.append(title, close);
+    const copy = document.createElement('p');
+    copy.className = 'k-handoff-copy';
+    copy.textContent = 'Continue the conversation with our support team in Telegram.';
+    panel.append(header, copy);
+
+    if (username) {
+        const link = document.createElement('a');
+        link.className = 'k-handoff-link';
+        link.href = `https://t.me/${encodeURIComponent(username)}`;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = 'Continue on Telegram';
+        panel.appendChild(link);
+    } else {
+        const unavailable = document.createElement('div');
+        unavailable.className = 'k-handoff-unavailable';
+        unavailable.textContent = 'Telegram support is not configured for this site yet.';
+        panel.appendChild(unavailable);
+    }
+
+    root.append(button, panel);
+    const mount = () => { if (!document.getElementById(root.id)) document.body.appendChild(root); };
+    if (document.body) mount();
+    else document.addEventListener('DOMContentLoaded', mount, { once: true });
+    const setOpen = (open) => { panel.setAttribute('data-open', String(open)); button.setAttribute('aria-expanded', String(open)); };
+    button.onclick = () => setOpen(panel.getAttribute('data-open') !== 'true');
+    close.onclick = () => setOpen(false);
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape') setOpen(false); });
+}
+
 (function() {
     const SERVER_URL = 'wss://chat.kaplia.pro';
 
+    const runningScript = document.currentScript;
+    const scriptHandoff = runningScript?.dataset?.telegramHandoff === 'true';
     const config = window.ChatSupportConfig || window.KapliaChatConfig || { defaultLanguage: 'en', initialMessages: ["Hello! How can we help you today?"], i18n: { en: { title: 'Chat Support by AKUniverse', subtitle: '', inputPlaceholder: 'Type a message...', sendBtn: 'Send' }, ua: { title: 'Chat Support by AKUniverse', subtitle: '', inputPlaceholder: '...', sendBtn: 'Send' } }, metadata: {}, useAdminTimezone: false };
+    if (scriptHandoff || config.telegramHandoff === true) {
+        renderTelegramHandoff(config, runningScript);
+        return;
+    }
     const lang = config.defaultLanguage || 'en';
     const texts = config.i18n[lang] || config.i18n['en'] || config.i18n['ua'];
 
@@ -294,9 +377,9 @@
         ws.onopen = () => {
             // Send metadata: either from config (authenticated) or with saved name (anonymous)
             if (hasMetadata) {
-                ws.send(JSON.stringify({ type: 'client_info', metadata: { ...config.metadata, telegram_bot_id: config.telegramBotId || '', ai_enabled: config.aiEnabled === true, ai_prompt: config.aiPrompt || '', current_url: window.location.href } }));
+                ws.send(JSON.stringify({ type: 'client_info', metadata: { ...config.metadata, telegram_bot_id: config.telegramBotId || '', current_url: window.location.href } }));
             } else if (savedName) {
-                ws.send(JSON.stringify({ type: 'client_info', metadata: { user_name: savedName, user_id: sessionId, user_email: 'anonymous', lang: lang, telegram_bot_id: config.telegramBotId || '', ai_enabled: config.aiEnabled === true, ai_prompt: config.aiPrompt || '', current_url: window.location.href } }));
+                ws.send(JSON.stringify({ type: 'client_info', metadata: { user_name: savedName, user_id: sessionId, user_email: 'anonymous', lang: lang, telegram_bot_id: config.telegramBotId || '', current_url: window.location.href } }));
             }
             sendTabVisibility();
             sendPageUrl();

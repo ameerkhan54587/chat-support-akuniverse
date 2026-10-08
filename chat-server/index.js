@@ -35,13 +35,9 @@ const nodemailer = require('nodemailer');
 // }
 
 const { db, isTurso } = require('./db');
-const { initDatabase, DEFAULT_API_TOKEN, DEFAULT_SAFETY_RULES, DEFAULT_GLOBAL_INSTRUCTIONS } = require('./db/schema');
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+const { initDatabase, DEFAULT_API_TOKEN } = require('./db/schema');
 const configLoader = require('./config-loader');
 const renderSessionStore = require('./renderSessionStore');
-const { AIEngine } = require('./ai-engine');
-const aiEngine = new AIEngine(db, { apiKey: GEMINI_API_KEY, defaultModel: GEMINI_MODEL });
 let webhookConfig = { url: '', enabled: 0 };
 let timeConfig = { timezone: '0', dateFormat: 'd.m.Y', timeFormat: 'H:i' };
 let realtimeTypingEnabled = 0;
@@ -238,33 +234,23 @@ function syncSiteTelegramBots() {
             lastUpdateId: 0,
         }));
 
-    if (siteBots.length > 0) {
-        for (const sBot of siteBots) {
-            const existingIdx = telegramBots.findIndex(b => b.siteId === sBot.siteId || b.id === sBot.id || b.botToken === sBot.botToken);
-            if (existingIdx >= 0) {
-                telegramBots[existingIdx] = {
-                    ...telegramBots[existingIdx],
-                    botToken: sBot.botToken,
-                    username: sBot.username || telegramBots[existingIdx].username,
-                    name: sBot.name,
-                    siteId: sBot.siteId,
-                    enabled: true,
-                };
-            } else {
-                telegramBots.push(sBot);
-            }
+    const siteIds = new Set(allSites.filter(site => site.telegram).map(site => site.id));
+    telegramBots = telegramBots.filter(bot => !siteIds.has(bot.siteId) && !String(bot.id || '').startsWith('site_'));
+    for (const sBot of siteBots) {
+        const existingIdx = telegramBots.findIndex(bot => bot.siteId === sBot.siteId || bot.id === sBot.id);
+        if (existingIdx >= 0) {
+            telegramBots[existingIdx] = { ...telegramBots[existingIdx], ...sBot };
+        } else {
+            telegramBots.push(sBot);
         }
-        console.log(`[Telegram] Synced ${telegramBots.length} active bot(s):`, telegramBots.map(b => `${b.name || b.id} (@${b.username || 'unknown'})`).join(', '));
+    }
 
-        if (!telegramConfig.enabled) {
-            telegramConfig.enabled = 1;
-            telegramConfig.botToken = telegramConfig.botToken || siteBots[0].botToken;
-        }
-        if (!telegramPollTimeout) {
-            setTimeout(() => {
-                scheduleTelegramPoll(0);
-            }, 2000);
-        }
+    if (siteBots.length > 0 && !telegramConfig.enabled) {
+        telegramConfig.enabled = 1;
+        telegramConfig.botToken = telegramConfig.botToken || siteBots[0].botToken;
+    }
+    if (siteBots.length > 0 && !telegramPollTimeout) {
+        setTimeout(() => scheduleTelegramPoll(0), 2000);
     }
 }
 
@@ -629,10 +615,6 @@ async function processTelegramUpdate(update, bot) {
         saveMessage(targetId, 'client', text, timestamp, (newId) => {
             broadcastToAdmins({ type: 'client_msg', from: targetId, text, info: metadata, timestamp, id: newId });
 
-            // Trigger AI Chat Pipeline for Telegram client message
-            handleAIChatPipeline(targetId, text, metadata, '').catch((error) => {
-                console.error('Telegram AI pipeline error:', error.message);
-            });
         });
         return;
     }
@@ -805,155 +787,10 @@ async function sendWebhook(userId, message, metadata, timestamp) {
     try { await fetch(webhookConfig.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); } catch (error) { console.error("Webhook Error:", error.message); }
 }
 
-async function handleAIChatPipeline(userId, message, metadata = {}, origin = '') {
-    try {
-        const history = await new Promise((resolve) => {
-            getHistory(userId, (rows) => resolve(rows.slice(-15)), 15, null, true);
-        });
-
-        let channelType = 'widget';
-        if (metadata.channel) {
-            channelType = metadata.channel;
-        } else if (metadata.source) {
-            channelType = metadata.source;
-        } else if (userId.startsWith('telegram:')) {
-            channelType = 'telegram';
-        } else if (userId.startsWith('email:')) {
-            channelType = 'email';
-        } else if (userId.startsWith('software:') || userId.startsWith('soft_')) {
-            channelType = 'software';
-        }
-
-        const aiResult = await aiEngine.processIncomingMessage({
-            sessionId: userId,
-            userMessage: message,
-            metadata,
-            origin,
-            conversationHistory: history,
-            channelType
-        });
-
-        if (!aiResult || !aiResult.handled) {
-            return;
-        }
-
-        const timestamp = new Date().toISOString();
-
-        // Helper to deliver AI response to Telegram or Email channels
-        const deliverToExternalChannels = (responseText) => {
-            // Telegram delivery
-            if (userId.startsWith('telegram:')) {
-                const clientMeta = clientInfo.get(userId) || metadata || {};
-                const bot = getTelegramBot(clientMeta.telegram_bot_id);
-                const privateChatId = userId.split(':').slice(-1)[0];
-                callTelegramApi('sendMessage', {
-                    chat_id: privateChatId,
-                    text: responseText,
-                }, bot).catch((error) => {
-                    console.error('Telegram AI reply error:', error.message);
-                });
-            }
-
-            // Email delivery
-            if (userId.startsWith('email:') || metadata.source === 'email' || metadata.channel === 'email') {
-                const recipientEmail = metadata.user_email || metadata.email;
-                if (recipientEmail && smtpConfig.host && smtpConfig.user && smtpConfig.password) {
-                    try {
-                        const transport = nodemailer.createTransport({
-                            host: smtpConfig.host,
-                            port: parseInt(smtpConfig.port) || 587,
-                            secure: smtpConfig.ssl,
-                            auth: { user: smtpConfig.user, pass: smtpConfig.password }
-                        });
-                        const fromAddress = smtpConfig.fromName ? `"${smtpConfig.fromName}" <${smtpConfig.user}>` : smtpConfig.user;
-                        transport.sendMail({
-                            from: fromAddress,
-                            to: recipientEmail,
-                            subject: metadata.subject ? `Re: ${metadata.subject}` : 'Chat Support AI Response',
-                            text: responseText
-                        }).catch(err => console.error('Email AI reply error:', err.message));
-                    } catch (mailErr) {
-                        console.error('Email AI transport error:', mailErr.message);
-                    }
-                }
-            }
-        };
-
-        // 1. Suggest Reply Mode: Broadcast suggestion to admin panel, do NOT send to user directly
-        if (aiResult.aiMode === 'suggest_reply') {
-            broadcastToAdmins({
-                type: 'ai_suggestion',
-                targetId: userId,
-                suggestion: aiResult.message,
-                confidence: aiResult.confidence,
-                siteId: aiResult.site?.id,
-                siteName: aiResult.site?.name,
-                action: aiResult.action,
-                reason: aiResult.escalationReason,
-                summary: aiResult.summary,
-                timestamp
-            });
-            return;
-        }
-
-        // 2. Escalation Triggered
-        if (aiResult.shouldEscalate) {
-            saveMessage(userId, 'support', aiResult.message, timestamp, (id) => {
-                sendToUserTabs(userId, { text: aiResult.message, sender: 'support', timestamp, id });
-                broadcastToAdmins({
-                    type: 'admin_msg_sent',
-                    targetId: userId,
-                    text: aiResult.message,
-                    timestamp,
-                    id,
-                    ai: true,
-                    escalated: true
-                });
-                broadcastToAdmins({
-                    type: 'session_escalated',
-                    targetId: userId,
-                    ticketId: aiResult.ticketId,
-                    reason: aiResult.escalationReason,
-                    summary: aiResult.summary,
-                    siteName: aiResult.site?.name,
-                    timestamp
-                });
-                broadcastToAdmins({
-                    type: 'session_ai_status_update',
-                    targetId: userId,
-                    status: 'escalated'
-                });
-
-                deliverToExternalChannels(aiResult.message);
-            });
-            return;
-        }
-
-        // 3. Normal Automatic Reply
-        if (aiResult.action === 'reply') {
-            saveMessage(userId, 'support', aiResult.message, timestamp, (id) => {
-                sendToUserTabs(userId, { text: aiResult.message, sender: 'support', timestamp, id });
-                broadcastToAdmins({
-                    type: 'admin_msg_sent',
-                    targetId: userId,
-                    text: aiResult.message,
-                    timestamp,
-                    id,
-                    ai: true
-                });
-
-                deliverToExternalChannels(aiResult.message);
-            });
-        }
-    } catch (err) {
-        console.error('Error in handleAIChatPipeline:', err.message);
-    }
-}
-
 const handleApiMessageSend = (targetId, message, res) => {
     const timestamp = new Date().toISOString();
-    saveMessage(targetId, 'support', message, timestamp, (newId) => {
-        sendToUserTabs(targetId, { text: message, sender: 'support', timestamp: timestamp, id: newId });
+    saveMessage(targetId, 'internal_team', message, timestamp, (newId) => {
+        sendToUserTabs(targetId, { text: message, sender: 'internal_team', timestamp: timestamp, id: newId });
         broadcastToAdmins({ type: 'api_msg_sent', targetId: targetId, text: message, timestamp: timestamp, id: newId });
         res.json({ status: 'success', sent_to: targetId, message: message, id: newId });
     });
@@ -1135,13 +972,13 @@ app.post('/api/contact-form', security.sensitiveRateLimiter(15), (req, res) => {
 // ADMIN AUTH & RENDER STORAGE SESSION MANAGEMENT
 // ============================================================
 
-// Helper: Require admin authentication (checks Render storage first, zero Turso load)
+// Helper: Require admin authentication
 function requireAdminAuth(req, res, next) {
     const rawToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.headers['x-session-token'] || req.query?.sessionToken;
     const token = typeof rawToken === 'string' ? rawToken.trim() : '';
     const clientIp = security.getClientIp(req);
 
-    // 1. Fast check against Render disk session storage (zero Turso load!)
+    // Sessions are disposable and process-local; durable records remain in Turso.
     if (token && token.startsWith('aksess_')) {
         const session = renderSessionStore.validateSession(token, clientIp);
         if (session) {
@@ -1150,12 +987,12 @@ function requireAdminAuth(req, res, next) {
         }
     }
 
-    // 2. Direct env / default API tokens
+    // Direct env / default API tokens
     if (token && (token === DEFAULT_API_TOKEN || (process.env.ADMIN_API_TOKEN && token === process.env.ADMIN_API_TOKEN.trim()))) {
         return next();
     }
 
-    // 3. Fallback check against DB
+    // Fallback check against DB
     checkApiToken(token, (isValid) => {
         if (isValid) return next();
         security.recordSuspiciousActivity(clientIp, 'Unauthorized Admin API access attempt', 1);
@@ -1163,7 +1000,7 @@ function requireAdminAuth(req, res, next) {
     });
 }
 
-// REST API: Admin login -> saves session to Render disk storage (data/admin_sessions.json)
+// REST API: Admin login -> issues a disposable process-local session
 app.post('/api/auth/login', (req, res) => {
     const { username, password } = req.body || {};
     const clientIp = security.getClientIp(req);
@@ -1176,13 +1013,13 @@ app.post('/api/auth/login', (req, res) => {
                                 (rawEnvPass && password === rawEnvPass) ||
                                 (row && row.password_hash && (bcrypt.compareSync(cleanAuthPass, row.password_hash) || bcrypt.compareSync(password, row.password_hash)));
         if (passwordMatches) {
-            // Save session into Render local disk storage - NOT Turso
+            // Session is intentionally temporary and never written to Render disk.
             const session = renderSessionStore.createSession({
                 username: username || row?.username || process.env.ADMIN_USERNAME || 'admin4353',
                 ip: clientIp,
                 userAgent: req.headers['user-agent'] || ''
             });
-            console.log(`[Auth API] Admin logged in. Session saved to Render storage: ${session.token.slice(0, 18)}...`);
+
             return res.json({
                 success: true,
                 sessionToken: session.token,
@@ -1195,17 +1032,17 @@ app.post('/api/auth/login', (req, res) => {
     });
 });
 
-// REST API: Admin logout -> deletes session from Render disk storage
+// REST API: Admin logout -> deletes the disposable session
 app.post('/api/auth/logout', (req, res) => {
     const rawToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.body?.sessionToken;
     const token = typeof rawToken === 'string' ? rawToken.trim() : '';
     if (token) {
         renderSessionStore.destroySession(token);
     }
-    res.json({ success: true, message: 'Logged out successfully from Render storage' });
+    res.json({ success: true, message: 'Logged out' });
 });
 
-// REST API: Verify session from Render disk storage (zero Turso load)
+// REST API: Verify disposable session
 app.get('/api/auth/session', (req, res) => {
     const rawToken = req.headers.authorization?.replace(/^Bearer\s+/i, '') || req.query?.sessionToken || req.query?.token;
     const token = typeof rawToken === 'string' ? rawToken.trim() : '';
@@ -1217,11 +1054,11 @@ app.get('/api/auth/session', (req, res) => {
     return res.status(401).json({ valid: false, error: 'invalid_or_expired_session' });
 });
 
-// REST API: List active Render storage sessions (admin only)
+// REST API: List active in-memory sessions (admin only)
 app.get('/api/auth/sessions', requireAdminAuth, (req, res) => {
     res.json({
-        storage: 'render_disk',
-        filePath: 'data/admin_sessions.json',
+        storage: 'memory',
+        durable: false,
         sessions: renderSessionStore.listSessions()
     });
 });
@@ -1243,7 +1080,7 @@ function refreshSiteDbMap(callback = () => {}) {
             }
 
             for (const s of allSites) {
-                const foundRow = rows.find(r => 
+                const foundRow = rows.find(r =>
                     (r.domain && s.domain && r.domain.toLowerCase() === s.domain.toLowerCase()) ||
                     (r.name && s.name && r.name.toLowerCase() === s.name.toLowerCase()) ||
                     s.id.toLowerCase() === r.name?.toLowerCase() ||
@@ -1335,36 +1172,8 @@ function requireTicketAuth(req, res, next) {
 }
 
 // Sites Management (Powered by data/sites.json preset repository)
-app.post('/api/sites', requireAdminAuth, (req, res) => {
-    const { domain, name, site_type, description, currency, timezone, ai_prompt, ai_reply } = req.body;
-    
-    if (!domain || !domain.trim()) {
-        return res.status(400).json({ error: 'missing_domain' });
-    }
-
-    const cleanDomain = domain.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
-    const newSite = {
-        id: cleanDomain.replace(/[^a-z0-9]/g, '_'),
-        name: name || domain,
-        domain: cleanDomain,
-        site_type: site_type || 'saas',
-        status: 'active',
-        ai_reply: ai_reply !== false,
-        description: description || '',
-        currency: currency || 'USD',
-        timezone: timezone || 'UTC',
-        allowed_origins: [`https://${cleanDomain}`, `https://*.${cleanDomain}`],
-        ai_prompt: ai_prompt || `SITE: ${name || domain}\nYou are the customer support assistant for ${name || domain}.`,
-        escalation_keywords: ['human', 'agent', 'refund', 'chargeback'],
-        confidence_threshold: 0.7,
-        tone: 'professional',
-        telegram: { bot_token: '', chat_id: '', enabled: false },
-        tickets: { auto_create: true, notify_telegram: false },
-        knowledge_base: []
-    };
-
-    configLoader.addSite(newSite);
-    res.json({ id: newSite.id, domain: newSite.domain, name: newSite.name, ai_reply: newSite.ai_reply });
+app.post('/api/sites', requireAdminAuth, (_req, res) => {
+    return res.status(403).json({ error: 'configuration_is_environment_only' });
 });
 
 app.get('/api/sites', requireAdminAuth, (req, res) => {
@@ -1375,11 +1184,11 @@ app.get('/api/sites', requireAdminAuth, (req, res) => {
         name: s.name || s.domain,
         site_type: s.site_type || 'saas',
         status: s.status || 'active',
-        ai_reply: s.ai_reply !== false && s.ai_replies !== false && s.ai_enabled !== false,
         description: s.description || '',
         currency: s.currency || 'USD',
         timezone: s.timezone || 'UTC',
         article_count: Array.isArray(s.knowledge_base) ? s.knowledge_base.length : 0,
+        telegram_username: s.telegram?.username || '',
         open_tickets_count: 0
     }));
     res.json(formatted);
@@ -1396,169 +1205,29 @@ app.get('/api/sites/:id', requireAdminAuth, (req, res) => {
 });
 
 app.put('/api/sites/:id', requireAdminAuth, (req, res) => {
-    const ok = configLoader.updateSite(req.params.id, req.body);
-    if (!ok) return res.status(404).json({ error: 'not_found' });
-    res.json({ success: true });
+    return res.status(403).json({ error: 'configuration_is_environment_only' });
 });
 
 app.delete('/api/sites/:id', requireAdminAuth, (req, res) => {
-    configLoader.deleteSite(req.params.id);
-    res.json({ success: true });
-});
-
-// Global AI Configuration
-app.get('/api/ai/global', requireAdminAuth, (req, res) => {
-    res.json({
-        system_safety_rules: configLoader.getGlobalAiRules() || DEFAULT_SAFETY_RULES,
-        global_instructions: DEFAULT_GLOBAL_INSTRUCTIONS,
-        default_model: GEMINI_MODEL
-    });
-});
-
-app.post('/api/ai/global', requireAdminAuth, (req, res) => {
-    const { system_safety_rules, default_model } = req.body;
-    const config = configLoader.loadConfig();
-    if (system_safety_rules) config.global_ai_rules = system_safety_rules;
-    configLoader.saveConfig(config);
-    if (default_model) aiEngine.setDefaultModel(default_model);
-    res.json({ success: true });
-});
-
-// Site Channels
-app.post('/api/sites/:site_id/channels', requireAdminAuth, (req, res) => {
-    res.json({ success: true });
-});
-
-app.get('/api/sites/:site_id/channels', requireAdminAuth, (req, res) => {
-    const site = configLoader.getSiteById(req.params.site_id);
-    const channels = [
-        { channel_type: 'widget', is_enabled: 1, ai_enabled: 1, ai_model: GEMINI_MODEL, ai_mode: 'automatic' },
-        { channel_type: 'telegram', is_enabled: site?.telegram?.enabled ? 1 : 0, ai_enabled: 1, ai_model: GEMINI_MODEL, ai_mode: 'automatic' },
-        { channel_type: 'email', is_enabled: 0, ai_enabled: 0, ai_model: GEMINI_MODEL, ai_mode: 'suggest_reply' }
-    ];
-    res.json(channels);
-});
-
-// AI Instructions with Versioning
-app.post('/api/sites/:site_id/ai-instructions', requireAdminAuth, (req, res) => {
-    const { instructions, escalation_keywords, confidence_threshold, tone, max_response_length } = req.body;
-    const site = configLoader.getSiteById(req.params.site_id);
-    if (!site) return res.status(404).json({ error: 'not_found' });
-
-    configLoader.updateSite(req.params.site_id, {
-        ai_prompt: instructions !== undefined ? instructions : site.ai_prompt,
-        escalation_keywords: Array.isArray(escalation_keywords) ? escalation_keywords : (typeof escalation_keywords === 'string' ? JSON.parse(escalation_keywords || '[]') : site.escalation_keywords),
-        confidence_threshold: confidence_threshold !== undefined ? confidence_threshold : site.confidence_threshold,
-        tone: tone || site.tone,
-        max_response_length: max_response_length || site.max_response_length
-    });
-    res.json({ success: true, version: 1 });
-});
-
-app.get('/api/sites/:site_id/ai-instructions', requireAdminAuth, (req, res) => {
-    const site = configLoader.getSiteById(req.params.site_id);
-    if (!site) return res.status(404).json({ error: 'not_found' });
-    res.json([
-        {
-            id: 1,
-            site_id: site.id,
-            channel_type: null,
-            instructions: site.ai_prompt || '',
-            escalation_keywords: site.escalation_keywords || [],
-            confidence_threshold: site.confidence_threshold ?? 0.7,
-            tone: site.tone || 'professional',
-            max_response_length: site.max_response_length || 500,
-            version: 1,
-            is_active: 1
-        }
-    ]);
-});
-
-app.post('/api/sites/:site_id/ai-instructions/:id/restore', requireAdminAuth, (req, res) => {
-    res.json({ success: true, restored_version: 1 });
-});
-
-// Site Knowledge Base (RAG)
-app.get('/api/sites/:site_id/knowledge', requireAdminAuth, (req, res) => {
-    const kb = configLoader.getSiteKnowledge(req.params.site_id);
-    res.json(kb.map(item => ({
-        id: item.id,
-        site_id: req.params.site_id,
-        title: item.title,
-        category: item.category || 'General',
-        content: item.content,
-        tags: item.tags || '',
-        is_active: 1
-    })));
-});
-
-app.post('/api/sites/:site_id/knowledge', requireAdminAuth, (req, res) => {
-    const { title, category, content, tags } = req.body;
-    const site = configLoader.getSiteById(req.params.site_id);
-    if (!site) return res.status(404).json({ error: 'not_found' });
-    if (!title || !content) {
-        return res.status(400).json({ error: 'missing_title_or_content' });
-    }
-
-    if (!Array.isArray(site.knowledge_base)) site.knowledge_base = [];
-    const newArticle = {
-        id: 'kb_' + Date.now().toString(36),
-        title: title.trim(),
-        category: category || 'General',
-        content: content.trim(),
-        tags: tags || ''
-    };
-    site.knowledge_base.push(newArticle);
-    configLoader.updateSite(site.id, { knowledge_base: site.knowledge_base });
-    res.json({ id: newArticle.id, success: true });
-});
-
-app.put('/api/sites/:site_id/knowledge/:id', requireAdminAuth, (req, res) => {
-    const site = configLoader.getSiteById(req.params.site_id);
-    if (!site) return res.status(404).json({ error: 'not_found' });
-
-    const kb = site.knowledge_base || [];
-    const item = kb.find(k => String(k.id) === String(req.params.id));
-    if (!item) return res.status(404).json({ error: 'not_found' });
-
-    const { title, category, content, tags } = req.body;
-    if (title !== undefined) item.title = title;
-    if (category !== undefined) item.category = category;
-    if (content !== undefined) item.content = content;
-    if (tags !== undefined) item.tags = tags;
-
-    configLoader.updateSite(site.id, { knowledge_base: kb });
-    res.json({ success: true });
-});
-
-app.delete('/api/sites/:site_id/knowledge/:id', requireAdminAuth, (req, res) => {
-    const site = configLoader.getSiteById(req.params.site_id);
-    if (!site) return res.status(404).json({ error: 'not_found' });
-
-    site.knowledge_base = (site.knowledge_base || []).filter(k => String(k.id) !== String(req.params.id));
-    configLoader.updateSite(site.id, { knowledge_base: site.knowledge_base });
-    res.json({ success: true });
+    return res.status(403).json({ error: 'configuration_is_environment_only' });
 });
 
 // Tickets Management
 app.post('/api/sites/:site_id/tickets', requireAdminAuth, (req, res) => {
-    const { session_id, channel_type, subject, priority, ai_attempted, ai_confidence, ai_response, ai_summary } = req.body;
+    const { session_id, channel_type, subject, priority } = req.body;
     const site_id = req.params.site_id;
 
     db.run(
-        `INSERT INTO tickets 
-        (site_id, session_id, channel_type, subject, priority, ai_attempted, ai_confidence, ai_response, ai_summary) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tickets
+        (site_id, session_id, channel_type, subject, priority, error_log)
+        VALUES (?, ?, ?, ?, ?, ?)`,
         [
             site_id,
             session_id || null,
             channel_type || 'widget',
             subject || 'Support Ticket',
             priority || 'medium',
-            ai_attempted ? 1 : 0,
-            ai_confidence || 0,
-            ai_response || null,
-            typeof ai_summary === 'object' ? JSON.stringify(ai_summary) : (ai_summary || '{}')
+            ''
         ],
         function(err) {
             if (err) return res.status(500).json({ error: 'db_error' });
@@ -1582,9 +1251,7 @@ app.get('/api/sites/:site_id/tickets', requireAdminAuth, (req, res) => {
     db.all(query, params, (err, tickets) => {
         if (err) return res.status(500).json({ error: 'db_error' });
         const parsed = (tickets || []).map(t => {
-            let summary = {};
-            try { summary = JSON.parse(t.ai_summary || '{}'); } catch (e) {}
-            return { ...t, ai_summary: summary };
+            return t;
         });
         res.json(parsed);
     });
@@ -1592,7 +1259,7 @@ app.get('/api/sites/:site_id/tickets', requireAdminAuth, (req, res) => {
 
 app.put('/api/tickets/:id', requireAdminAuth, (req, res) => {
     const { status, priority, assigned_to, resolution } = req.body;
-    
+
     db.run(
         'UPDATE tickets SET status = ?, priority = ?, assigned_to = ?, resolution = ?, resolved_at = ? WHERE id = ?',
         [status || 'open', priority || 'medium', assigned_to || null, resolution || null, status === 'resolved' ? new Date().toISOString() : null, req.params.id],
@@ -1629,11 +1296,9 @@ app.get('/api/tickets', requireAdminAuth, (req, res) => {
         if (err) return res.status(500).json({ error: 'db_error' });
         const allSites = configLoader.getAllSites ? configLoader.getAllSites() : [];
         const parsed = (tickets || []).map(t => {
-            let summary = {};
-            try { summary = JSON.parse(t.ai_summary || '{}'); } catch (e) {}
 
-            const siteJson = allSites.find(s => 
-                siteSlugToDbId.get(s.id) === t.site_id || 
+            const siteJson = allSites.find(s =>
+                siteSlugToDbId.get(s.id) === t.site_id ||
                 (t.site_domain && s.domain && s.domain.toLowerCase() === t.site_domain.toLowerCase()) ||
                 (t.site_name && s.name && s.name.toLowerCase() === t.site_name.toLowerCase()) ||
                 String(t.site_id).toLowerCase() === s.id.toLowerCase()
@@ -1643,7 +1308,6 @@ app.get('/api/tickets', requireAdminAuth, (req, res) => {
                 ...t,
                 site_name: siteJson ? siteJson.name : (t.site_name || `Site #${t.site_id}`),
                 site_domain: siteJson ? siteJson.domain : (t.site_domain || ''),
-                ai_summary: summary
             };
         });
         res.json(parsed);
@@ -1662,21 +1326,13 @@ app.post('/api/tickets', requireTicketAuth, security.sensitiveRateLimiter(30), (
         traceback,
         user_id,
         version,
-        ai_summary
     } = req.body;
 
     const targetSiteSlug = site_id || req.site?.id || 'fbverse_bot';
     const resolvedSiteId = resolveSiteId(targetSiteSlug);
 
-    let summaryObj = {};
-    if (typeof ai_summary === 'object' && ai_summary !== null) {
-        summaryObj = { ...ai_summary };
-    } else if (typeof ai_summary === 'string') {
-        try { summaryObj = JSON.parse(ai_summary); } catch { summaryObj = { summary: ai_summary }; }
-    }
-    if (error_log || traceback) summaryObj.error_log = security.stripScripts(String(error_log || traceback)).slice(0, 4000);
-    if (user_id) summaryObj.user_id = String(user_id).slice(0, 100);
-    if (version) summaryObj.version = String(version).slice(0, 50);
+    const errorLog = security.stripScripts(String(error_log || traceback || '')).slice(0, 4000);
+    const errorLogPayload = errorLog;
 
     const rawSubject = subject || title || (error_log ? `Bug: ${String(error_log).slice(0, 50)}...` : 'Support Ticket');
     const finalSubject = security.stripScripts(String(rawSubject)).slice(0, 200);
@@ -1685,16 +1341,16 @@ app.post('/api/tickets', requireTicketAuth, security.sensitiveRateLimiter(30), (
     const finalSession = session_id || (user_id ? `software_${user_id}` : `soft_${Math.random().toString(36).substr(2, 7)}`);
 
     db.run(
-        `INSERT INTO tickets 
-        (site_id, session_id, channel_type, subject, priority, ai_attempted, ai_confidence, ai_response, ai_summary) 
-        VALUES (?, ?, ?, ?, ?, 0, 0, null, ?)`,
+        `INSERT INTO tickets
+        (site_id, session_id, channel_type, subject, priority, error_log)
+        VALUES (?, ?, ?, ?, ?, ?)`,
         [
             resolvedSiteId,
             finalSession,
             finalChannel,
             finalSubject,
             finalPriority,
-            JSON.stringify(summaryObj)
+            errorLogPayload
         ],
         function(err) {
             if (err) {
@@ -1712,13 +1368,13 @@ app.post('/api/tickets', requireTicketAuth, security.sensitiveRateLimiter(30), (
                 type: 'new_ticket',
                 ticket: {
                     id: ticketId,
+                    error_log: errorLogPayload,
                     site_id: resolvedSiteId,
                     site_name: siteName,
                     site_domain: siteObj?.domain || '',
                     channel_type: finalChannel,
                     subject: finalSubject,
                     priority: finalPriority,
-                    ai_summary: summaryObj,
                     status: 'open',
                     is_read: 0,
                     created_at: new Date().toISOString()
@@ -1740,28 +1396,26 @@ app.post('/api/bugs', requireTicketAuth, security.sensitiveRateLimiter(30), (req
     req.body.channel_type = req.body.channel_type || 'software';
     if (!req.body.subject && req.body.title) req.body.subject = req.body.title;
     // Dispatch to /api/tickets handler logic
-    const { site_id, subject, priority, error_log, traceback, user_id, version, ai_summary } = req.body;
+    const { site_id, subject, priority, error_log, traceback, user_id } = req.body;
     const targetSiteSlug = site_id || req.site?.id || 'fbverse_bot';
     const resolvedSiteId = resolveSiteId(targetSiteSlug);
 
-    let summaryObj = typeof ai_summary === 'object' && ai_summary !== null ? { ...ai_summary } : {};
-    if (error_log || traceback) summaryObj.error_log = security.stripScripts(String(error_log || traceback)).slice(0, 4000);
-    if (user_id) summaryObj.user_id = String(user_id).slice(0, 100);
-    if (version) summaryObj.version = String(version).slice(0, 50);
+    const errorLog = security.stripScripts(String(error_log || traceback || '')).slice(0, 4000);
+    const errorLogPayload = errorLog;
 
     const rawSubject = subject || `Software Bug: ${error_log ? String(error_log).slice(0, 45) : 'Reported issue'}`;
     const finalSubject = security.stripScripts(String(rawSubject)).slice(0, 200);
 
     db.run(
-        `INSERT INTO tickets 
-        (site_id, session_id, channel_type, subject, priority, ai_attempted, ai_confidence, ai_response, ai_summary) 
-        VALUES (?, ?, 'software', ?, ?, 0, 0, null, ?)`,
+        `INSERT INTO tickets
+        (site_id, session_id, channel_type, subject, priority, error_log)
+        VALUES (?, ?, 'software', ?, ?, ?)`,
         [
             resolvedSiteId,
             user_id ? `software_${user_id}` : `soft_${Math.random().toString(36).substr(2, 7)}`,
             finalSubject,
             priority || 'high',
-            JSON.stringify(summaryObj)
+            errorLogPayload
         ],
         function(err) {
             if (err) {
@@ -1777,13 +1431,13 @@ app.post('/api/bugs', requireTicketAuth, security.sensitiveRateLimiter(30), (req
                 type: 'new_ticket',
                 ticket: {
                     id: this.lastID,
+                    error_log: errorLogPayload,
                     site_id: resolvedSiteId,
                     site_name: siteName,
                     site_domain: siteObj?.domain || '',
                     channel_type: 'software',
                     subject: finalSubject,
                     priority: priority || 'high',
-                    ai_summary: summaryObj,
                     status: 'open',
                     is_read: 0,
                     created_at: new Date().toISOString()
@@ -1861,121 +1515,6 @@ app.delete('/api/security/blacklist/:ip', requireAdminAuth, (req, res) => {
     res.json({ success: unbanned, ip: cleanIp });
 });
 
-// AI Simulation Sandbox (Section 25 Testing)
-app.post('/api/ai/simulate', requireAdminAuth, async (req, res) => {
-    const { site_id, message, channel_type, customer_context } = req.body;
-
-    if (!site_id || !message) {
-        return res.status(400).json({ error: 'missing_site_id_or_message' });
-    }
-
-    try {
-        db.get('SELECT * FROM sites WHERE id = ?', [site_id], async (err, site) => {
-            if (err || !site) return res.status(404).json({ error: 'site_not_found' });
-
-            const instructions = await aiEngine.getInstructions(site_id, channel_type || 'widget');
-            const knowledge = await aiEngine.retrieveKnowledge(site_id, message);
-            const customer = customer_context || {
-                user_id: 'sim_user_1',
-                user_name: 'Test Customer',
-                user_email: 'customer@example.com',
-                order_id: 'ORD-98765'
-            };
-
-            const promptObj = aiEngine.buildPrompt({
-                site,
-                customer,
-                conversation: [],
-                instructions,
-                knowledge,
-                userMessage: message,
-                ticketId: 'SIM-TKT-1001'
-            });
-
-            const keywordCheck = aiEngine.checkEscalationKeywords(message, instructions.escalationKeywords);
-            const aiOutput = await aiEngine.callGemini(promptObj.systemPrompt, '', message, instructions.model);
-
-            let shouldEscalate = keywordCheck.triggered || aiOutput.requires_human || aiOutput.action === 'escalate' || (aiOutput.confidence < instructions.confidenceThreshold);
-            let escalationReason = keywordCheck.triggered 
-                ? `Triggered escalation keyword: "${keywordCheck.keyword}"`
-                : (aiOutput.reason || (aiOutput.confidence < instructions.confidenceThreshold ? `Confidence below threshold ${instructions.confidenceThreshold}` : null));
-
-            const resolvedMessage = aiEngine.resolveVariables(aiOutput.message, { site, customer, ticketId: 'SIM-TKT-1001' });
-
-            res.json({
-                site: { id: site.id, name: site.name, domain: site.domain },
-                instructions: {
-                    version: instructions.version,
-                    tone: instructions.tone,
-                    confidenceThreshold: instructions.confidenceThreshold,
-                    model: instructions.model,
-                    aiMode: instructions.aiMode
-                },
-                knowledge_retrieved: knowledge,
-                escalation_keyword_triggered: keywordCheck,
-                ai_output: {
-                    action: shouldEscalate ? 'escalate' : aiOutput.action,
-                    message: resolvedMessage,
-                    requires_human: shouldEscalate,
-                    ticket_required: shouldEscalate,
-                    confidence: aiOutput.confidence,
-                    reason: escalationReason,
-                    ticket_summary: aiOutput.ticket_summary,
-                    latency: aiOutput.latency
-                },
-                validation: {
-                    should_escalate: shouldEscalate,
-                    escalation_reason: escalationReason,
-                    confidence_passed: aiOutput.confidence >= instructions.confidenceThreshold
-                }
-            });
-        });
-    } catch (e) {
-        console.error('Simulation error:', e);
-        res.status(500).json({ error: e.message });
-    }
-});
-
-// AI Audit Logs
-app.get('/api/ai/logs', requireAdminAuth, (req, res) => {
-    const siteId = req.query.site_id || null;
-    const limit = parseInt(req.query.limit) || 50;
-
-    let query = 'SELECT * FROM ai_runs';
-    let params = [];
-    if (siteId) {
-        query += ' WHERE site_id = ?';
-        params.push(siteId);
-    }
-    query += ' ORDER BY created_at DESC LIMIT ?';
-    params.push(limit);
-
-    db.all(query, params, (err, runs) => {
-        if (err) return res.status(500).json({ error: 'db_error' });
-        res.json(runs || []);
-    });
-});
-
-// Session AI Status & Handoff Controls
-app.get('/api/sessions/:id/ai-status', requireAdminAuth, (req, res) => {
-    const status = aiEngine.getSessionStatus(req.params.id);
-    res.json({ status });
-});
-
-app.post('/api/sessions/:id/resume-ai', requireAdminAuth, (req, res) => {
-    const sessionId = req.params.id;
-    aiEngine.resumeAI(sessionId);
-    broadcastToAdmins({ type: 'session_ai_status_update', targetId: sessionId, status: 'active' });
-    res.json({ success: true, status: 'active' });
-});
-
-app.post('/api/sessions/:id/pause-ai', requireAdminAuth, (req, res) => {
-    const sessionId = req.params.id;
-    aiEngine.pauseAI(sessionId);
-    broadcastToAdmins({ type: 'session_ai_status_update', targetId: sessionId, status: 'human_active' });
-    res.json({ success: true, status: 'human_active' });
-});
-
 wss.on('connection', (ws, req) => {
     // 1. WebSocket IP Flood & Blacklist Check
     const wsSecurityCheck = security.checkWsConnectionAllowed(req);
@@ -2000,7 +1539,7 @@ wss.on('connection', (ws, req) => {
     const sessionToken = parameters.query.sessionToken;
     const origin = req.headers.origin || '';
 
-    // Check Render disk storage session first (zero Turso load!)
+    // Check disposable in-memory session first.
     const candidateSessionToken = sessionToken || (authPass && authPass.startsWith('aksess_') ? authPass : null);
     const validRenderSession = candidateSessionToken ? renderSessionStore.validateSession(candidateSessionToken, clientIp) : null;
 
@@ -2079,79 +1618,7 @@ wss.on('connection', (ws, req) => {
                             ws.close(1000, 'Admin logged out');
                             return;
                         }
-                        if (data.type === 'change_password') {
-                            const newHash = bcrypt.hashSync(data.newPassword, 10);
-                            db.run("UPDATE admins SET password_hash = ? WHERE username = ?", [newHash, 'admin'], () => ws.send(JSON.stringify({ type: 'system', text: 'Password changed successfully!' })));
-                        }
-                        if (data.type === 'change_api_token') {
-                            db.run("UPDATE admins SET api_token = ? WHERE username = ?", [data.newToken, 'admin'], () => ws.send(JSON.stringify({ type: 'system', text: 'Token updated!' })));
-                        }
-                        if (data.type === 'update_webhook') {
-                            const enabled = data.enabled ? 1 : 0;
-                            db.run("UPDATE admins SET webhook_url = ?, webhook_enabled = ? WHERE username = ?", [data.url, enabled, 'admin'], () => {
-                                webhookConfig.url = data.url; webhookConfig.enabled = enabled;
-                                ws.send(JSON.stringify({ type: 'system', text: 'Webhook saved!' }));
-                            });
-                        }
-                        if (data.type === 'update_time_settings') {
-                            db.run("UPDATE admins SET timezone = ?, date_format = ?, time_format = ? WHERE username = ?",
-                                [data.timezone, data.dateFormat, data.timeFormat, 'admin'], () => {
-                                    timeConfig.timezone = data.timezone;
-                                    timeConfig.dateFormat = data.dateFormat;
-                                    timeConfig.timeFormat = data.timeFormat;
-                                    ws.send(JSON.stringify({ type: 'system', text: 'Time settings saved!' }));
-                                });
-                        }
-                        if (data.type === 'update_realtime_typing') {
-                            const enabled = data.enabled ? 1 : 0;
-                            db.run("UPDATE admins SET realtime_typing = ? WHERE username = ?", [enabled, 'admin'], () => {
-                                realtimeTypingEnabled = enabled;
-                                ws.send(JSON.stringify({ type: 'system', text: `Typing preview: ${enabled ? 'ENABLED' : 'DISABLED'}` }));
-                            });
-                        }
-                        if (data.type === 'update_system_logs') {
-                            const { setting, enabled } = data;
-                            const value = enabled ? 1 : 0;
-                            const columnMap = {
-                                onlineStatus: 'log_online_status',
-                                tabActivity: 'log_tab_activity',
-                                chatWidget: 'log_chat_widget',
-                                pageVisits: 'log_page_visits'
-                            };
-                            const column = columnMap[setting];
-                            if (column) {
-                                db.run(`UPDATE admins SET ${column} = ? WHERE username = ?`, [value, 'admin'], () => {
-                                    systemLogsConfig[setting] = value;
-                                    ws.send(JSON.stringify({ type: 'system_logs_updated', setting, enabled: value }));
-                                });
-                            }
-                        }
-                        if (data.type === 'update_allowed_origins') {
-                            db.run("UPDATE admins SET allowed_origins = ? WHERE username = ?", [data.origins, 'admin'], () => {
-                                allowedOrigins = data.origins.split('\n').filter(o => o.trim());
-                                ws.send(JSON.stringify({ type: 'system', text: 'Allowed origins saved!' }));
-                            });
-                        }
-                        if (data.type === 'update_anonymous_origins') {
-                            db.run("UPDATE admins SET allowed_anonymous_origins = ? WHERE username = ?", [data.origins, 'admin'], () => {
-                                allowedAnonymousOrigins = data.origins.split('\n').filter(o => o.trim());
-                                ws.send(JSON.stringify({ type: 'system', text: 'Anonymous origins saved!' }));
-                            });
-                        }
-                        if (data.type === 'update_language') {
-                            db.run("UPDATE admins SET admin_language = ? WHERE username = ?", [data.language, 'admin'], () => {
-                                adminLanguage = data.language;
-                                ws.send(JSON.stringify({ type: 'language_updated', language: data.language }));
-                            });
-                        }
-                        if (data.type === 'update_rate_limit') {
-                            db.run("UPDATE admins SET max_messages_per_minute = ?, max_message_length = ? WHERE username = ?",
-                                [data.maxMessagesPerMinute, data.maxMessageLength, 'admin'], () => {
-                                    rateLimitConfig.maxMessagesPerMinute = data.maxMessagesPerMinute;
-                                    rateLimitConfig.maxMessageLength = data.maxMessageLength;
-                                    ws.send(JSON.stringify({ type: 'system', text: 'Message limits saved!' }));
-                                });
-                        }
+                        // Configuration is environment-only; settings mutation events are ignored.
 
                         if (data.type === 'get_history') {
                             const limit = data.limit || messageLoadConfig.adminMessagesLimit;
@@ -2190,101 +1657,7 @@ wss.on('connection', (ws, req) => {
                             }, limit, beforeId);
                         }
 
-                        if (data.type === 'update_message_limits') {
-                            db.run("UPDATE admins SET admin_messages_limit = ?, widget_messages_limit = ? WHERE username = ?",
-                                [data.adminMessagesLimit, data.widgetMessagesLimit, 'admin'], () => {
-                                    messageLoadConfig.adminMessagesLimit = data.adminMessagesLimit;
-                                    messageLoadConfig.widgetMessagesLimit = data.widgetMessagesLimit;
-                                    ws.send(JSON.stringify({ type: 'system', text: 'Message settings saved!' }));
-                                });
-                        }
-
-                        if (data.type === 'update_business_hours') {
-                            const json = JSON.stringify(data.businessHours || {});
-                            db.run("UPDATE admins SET business_hours = ? WHERE username = ?", [json, 'admin'], () => {
-                                businessHoursConfig = data.businessHours || {};
-                                    ws.send(JSON.stringify({ type: 'system', text: 'Business hours saved!' }));
-                            });
-                        }
-
-                        if (data.type === 'update_smtp') {
-                            const cfg = data.smtpConfig || {};
-                            const json = JSON.stringify(cfg);
-                            db.run("UPDATE admins SET smtp_config = ? WHERE username = ?", [json, 'admin'], () => {
-                                smtpConfig = cfg;
-                                    ws.send(JSON.stringify({ type: 'system', text: 'SMTP settings saved!' }));
-                            });
-                        }
-
-                        if (data.type === 'update_telegram_settings') {
-                            telegramConfig.botToken = (data.telegramConfig?.botToken || '').trim();
-                            telegramConfig.chatId = String(data.telegramConfig?.chatId || '').trim();
-                            saveTelegramConfig(() => {
-                                broadcastToAdmins({ type: 'telegram_updated', telegramConfig: getMaskedTelegramConfig() });
-                                ws.send(JSON.stringify({ type: 'system', text: 'Telegram settings saved!' }));
-                            });
-                        }
-
-                        if (data.type === 'update_telegram_bots') {
-                            telegramBots = Array.isArray(data.bots) ? data.bots.map((bot, index) => ({
-                                id: bot.id || `bot-${Date.now()}-${index}`,
-                                name: String(bot.name || '').trim() || 'Telegram bot',
-                                botToken: String(bot.botToken || '').trim(),
-                                username: bot.username || '',
-                                enabled: !!bot.enabled,
-                                lastUpdateId: Number(bot.lastUpdateId || 0),
-                            })).filter(bot => bot.botToken) : [];
-                            telegramConfig.botToken = telegramBots[0]?.botToken || '';
-                            telegramConfig.enabled = telegramBots.some(bot => bot.enabled) ? 1 : 0;
-                            saveTelegramConfig(() => {
-                                broadcastToAdmins({ type: 'telegram_updated', telegramConfig: getMaskedTelegramConfig() });
-                                ws.send(JSON.stringify({ type: 'system', text: 'Telegram bots saved!' }));
-                            });
-                        }
-
-                        if (data.type === 'toggle_telegram_bot') {
-                            const shouldEnable = !!data.enabled;
-                            const finalize = (messageText) => {
-                                broadcastToAdmins({ type: 'telegram_updated', telegramConfig: getMaskedTelegramConfig() });
-                                ws.send(JSON.stringify({ type: 'system', text: messageText }));
-                            };
-
-                            if (shouldEnable) {
-                                startTelegramBot(true)
-                                    .then(() => finalize('Telegram bot enabled!'))
-                                    .catch((error) => {
-                                        console.error('Telegram start error:', error.message);
-                                        ws.send(JSON.stringify({ type: 'system', text: `Telegram error: ${error.message}` }));
-                                    });
-                            } else {
-                                stopTelegramBot()
-                                    .then(() => finalize('Telegram bot disabled!'))
-                                    .catch((error) => {
-                                        console.error('Telegram stop error:', error.message);
-                                        ws.send(JSON.stringify({ type: 'system', text: `Telegram error: ${error.message}` }));
-                                    });
-                            }
-                        }
-
-                        if (data.type === 'test_smtp') {
-                            const cfg = data.smtpConfig || smtpConfig;
-                            const transport = nodemailer.createTransport({
-                                host: cfg.host,
-                                port: parseInt(cfg.port) || 587,
-                                secure: cfg.ssl,
-                                auth: { user: cfg.user, pass: cfg.password }
-                            });
-                            transport.sendMail({
-                                from: cfg.fromName ? `"${cfg.fromName}" <${cfg.user}>` : cfg.user,
-                                to: cfg.testEmail || cfg.user,
-                                subject: 'Chat Support by AKUniverse — Test Email',
-                                text: 'SMTP is configured correctly!'
-                            }).then(() => {
-                                ws.send(JSON.stringify({ type: 'system', text: 'Test email sent!' }));
-                            }).catch((err) => {
-                                ws.send(JSON.stringify({ type: 'system', text: `SMTP error: ${err.message}` }));
-                            });
-                        }
+                        // Runtime configuration changes are disabled; configure via environment.
 
                         if (data.type === 'admin_typing') {
                             sendToUserTabs(data.targetId, { type: 'admin_typing', isTyping: data.isTyping });
@@ -2300,12 +1673,10 @@ wss.on('connection', (ws, req) => {
                         }
 
                         if (data.type === 'admin_reply') {
-                            aiEngine.pauseAI(data.targetId);
-                            broadcastToAdmins({ type: 'session_ai_status_update', targetId: data.targetId, status: 'human_active' });
 
                             const timestamp = new Date().toISOString();
-                            saveMessage(data.targetId, 'support', data.text, timestamp, (newId) => {
-                                sendToUserTabs(data.targetId, { text: data.text, sender: 'support', timestamp: timestamp, id: newId });
+                            saveMessage(data.targetId, 'internal_team', data.text, timestamp, (newId) => {
+                                sendToUserTabs(data.targetId, { text: data.text, sender: 'internal_team', timestamp: timestamp, id: newId });
                                 broadcastToAdmins({ type: 'admin_msg_sent', targetId: data.targetId, text: data.text, timestamp: timestamp, id: newId });
 
                                 if (data.targetId.startsWith('telegram:')) {
@@ -2323,17 +1694,7 @@ wss.on('connection', (ws, req) => {
                             });
                         }
 
-                        if (data.type === 'resume_ai') {
-                            aiEngine.resumeAI(data.targetId);
-                            broadcastToAdmins({ type: 'session_ai_status_update', targetId: data.targetId, status: 'active' });
-                            ws.send(JSON.stringify({ type: 'system', text: 'AI resumed for this conversation' }));
-                        }
 
-                        if (data.type === 'pause_ai') {
-                            aiEngine.pauseAI(data.targetId);
-                            broadcastToAdmins({ type: 'session_ai_status_update', targetId: data.targetId, status: 'human_active' });
-                            ws.send(JSON.stringify({ type: 'system', text: 'AI paused (human active)' }));
-                        }
 
                         if (data.type === 'delete_message') {
                             db.run("DELETE FROM messages WHERE id = ?", [data.msgId], (err) => {
@@ -2441,7 +1802,7 @@ wss.on('connection', (ws, req) => {
             };
 
             if (validRenderSession) {
-                // Immediate authentication from Render disk storage (zero Turso queries!)
+                // Immediate authentication from process-local session (no durable state).
                 proceedAdmin(null, validRenderSession);
             } else {
                 // Authenticate with password against admins table or environment
@@ -2751,9 +2112,6 @@ wss.on('connection', (ws, req) => {
                 saveMessage(userId, 'client', parsed.text, timestamp, (newId) => {
                     const meta = clientInfo.get(userId);
                     sendWebhook(userId, parsed.text, meta, timestamp);
-                    handleAIChatPipeline(userId, parsed.text, meta, origin).catch((error) => {
-                        console.error('AI Chat Pipeline error:', error.message);
-                    });
                     sendTelegramMessage(userId, parsed.text, meta).catch((error) => {
                         console.error('Telegram send error:', error.message);
                     });

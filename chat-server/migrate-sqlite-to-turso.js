@@ -34,16 +34,10 @@ const tursoClient = createClient({
 const TABLES_IN_ORDER = [
     'admins',
     'sites',
-    'global_ai_config',
-    'site_channels',
-    'ai_instructions',
-    'site_knowledge_base',
     'sessions',
     'messages',
     'telegram_threads',
-    'tickets',
-    'ai_runs',
-    'ai_resolutions'
+    'tickets'
 ];
 
 async function migrate() {

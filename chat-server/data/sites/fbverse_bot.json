@@ -4,12 +4,6 @@
   "domain": "fbverse.com",
   "site_type": "saas",
   "status": "active",
-  "ai_reply": {
-    "widget": true,
-    "telegram": true,
-    "email": false
-  },
-  "api_key": "fbv_live_sec_7a89f2c3104e",
   "description": "Facebook marketplace bot, profile automation, draft publisher, and account monitoring",
   "currency": "USD",
   "timezone": "UTC",
@@ -19,20 +13,7 @@
     "http://localhost:5173",
     "http://localhost:8080"
   ],
-  "ai_prompt": "SITE: FBVerse Bot\nYou are the customer support assistant for FBVerse Bot.\nFBVerse provides advanced Facebook marketplace automation, draft publishers, account warming scripts, and multi-profile monitoring.\nAssist users with bot installation, cookie imports, marketplace listing limits, safety delays between postings, and license key activation.\nEscalate immediately on payment problems, unexpected account checkpoints, or licensing disputes.",
-  "escalation_keywords": [
-    "account banned",
-    "checkpoint",
-    "fraud",
-    "human",
-    "agent",
-    "lawsuit",
-    "license error"
-  ],
-  "confidence_threshold": 0.7,
-  "tone": "professional",
   "telegram": {
-    "bot_token": "8893096087:AAEqvhzPQKc5wl9jPHtSPgEMuNSSeHMx89Y",
     "username": "fbversebot",
     "chat_id": "",
     "enabled": true

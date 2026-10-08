@@ -1,39 +1,31 @@
+/* eslint-disable react-refresh/only-export-components */
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useChat } from '../context/ChatContext';
 import { useTranslation } from '../i18n';
 import { getTimeString } from '../utils/dateUtils';
 import { ConfirmModal } from './ConfirmModal';
 import { EditUserModal } from './EditUserModal';
+import { ticketsForChat, conversationsForBrand, getConversationChannel, getConversationBrand, TELEGRAM_BRAND_TABS } from '../utils/ticketChat';
 
 export function getUserChannel(userId, info = {}) {
-  if (info.channel === 'telegram' || info.telegram_bot_name || info.telegram_bot_id || info.telegram_chat_id || String(userId).startsWith('tg_')) {
-    return 'telegram';
-  }
-  if (info.channel === 'email' || info.source === 'email' || String(userId).startsWith('email_')) {
-    return 'email';
-  }
-  return 'widget';
+  return getConversationChannel(userId, info);
 }
 
 export function Sidebar({
   onSelectUser,
   onDeleteUser,
   onEditUser,
-  onOpenSettings,
-  onOpenSites,
-  onLogout,
   onSearch,
   onSearchResultsHandler,
-  activeChannelTab = 'all',
-  onSelectChannelTab,
-  tickets = [],
-  activeTicketId = null,
-  onSelectTicket = () => {},
-  onClearAllTickets = () => {}
+  activeChannelTab = 'brand:fbverse_bot',
+  tickets = []
 }) {
   const { state } = useChat();
   const { t } = useTranslation();
   const { users, usersInfo, activeUserId, notifications, onlineUsers, tabActiveUsers, config } = state;
+  const brandTabs = TELEGRAM_BRAND_TABS;
+  const activeBrand = brandTabs.find(tab => tab.id === activeChannelTab);
+  const channelFilteredUsers = useMemo(() => activeBrand ? conversationsForBrand(users, usersInfo, activeBrand.id) : [], [users, usersInfo, activeBrand]);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [editUserId, setEditUserId] = useState(null);
 
@@ -46,29 +38,7 @@ export function Sidebar({
   const debounceTimerRef = useRef(null);
   const lastSearchQueryRef = useRef('');
 
-  // Sort users: online first, then offline
-  const sortedUsers = useMemo(() => {
-    return [...users].sort((a, b) => {
-      const aOnline = onlineUsers[a] ?? false;
-      const bOnline = onlineUsers[b] ?? false;
-      if (aOnline === bOnline) return 0;
-      return aOnline ? -1 : 1;
-    });
-  }, [users, onlineUsers]);
-
-  // Filter users based on activeChannelTab
-  const channelFilteredUsers = useMemo(() => {
-    return sortedUsers.filter(userId => {
-      if (!activeChannelTab || activeChannelTab === 'all' || activeChannelTab === 'tickets') return true;
-      const info = usersInfo[userId] || {};
-      const channel = getUserChannel(userId, info);
-      if (activeChannelTab === 'escalated') {
-        const aiStatus = state.sessionAiStatuses?.[userId];
-        return aiStatus === 'escalated' || aiStatus === 'human_active';
-      }
-      return channel === activeChannelTab;
-    });
-  }, [sortedUsers, usersInfo, activeChannelTab, state.sessionAiStatuses]);
+  const sortedChannelUsers = useMemo(() => [...channelFilteredUsers].sort((a, b) => (onlineUsers[b] ? 1 : 0) - (onlineUsers[a] ? 1 : 0)), [channelFilteredUsers, onlineUsers]);
 
   const isUserOnline = (userId) => onlineUsers[userId] ?? false;
   const isTabActive = (userId) => tabActiveUsers[userId] ?? false;
@@ -170,8 +140,6 @@ export function Sidebar({
     const email = info?.user_email || info?.email || '';
     const initial = name.charAt(0).toUpperCase();
     const channel = getUserChannel(userId, info);
-    const aiStatus = state.sessionAiStatuses?.[userId];
-    const isEscalated = aiStatus === 'escalated' || aiStatus === 'human_active';
     const unreadCount = Number(notifications[userId]) || (notifications[userId] ? 1 : 0);
     const hasUnread = unreadCount > 0;
 
@@ -226,11 +194,7 @@ export function Sidebar({
                     {unreadCount} new
                   </span>
                 )}
-                {isEscalated ? (
-                  <span className="text-[10px] bg-rose-50 text-rose-700 px-1.5 py-0.2 rounded border border-rose-200 font-bold">
-                    ⚠️ Escalated
-                  </span>
-                ) : channel === 'telegram' ? (
+                {channel === 'telegram' ? (
                   <span className="text-[10px] bg-sky-50 text-sky-700 px-1.5 py-0.2 rounded border border-sky-200 font-medium">
                     ✈️ Telegram
                   </span>
@@ -260,121 +224,6 @@ export function Sidebar({
     );
   };
 
-  // Filtered tickets (supports search mode)
-  const filteredTickets = useMemo(() => {
-    if (!tickets || !Array.isArray(tickets)) return [];
-    if (searchMode && searchQuery.trim().length >= 2) {
-      const q = searchQuery.toLowerCase().trim();
-      return tickets.filter(t => {
-        return String(t.id).includes(q) ||
-          (t.subject && t.subject.toLowerCase().includes(q)) ||
-          (t.site_name && t.site_name.toLowerCase().includes(q)) ||
-          (t.channel_type && t.channel_type.toLowerCase().includes(q)) ||
-          (t.priority && t.priority.toLowerCase().includes(q)) ||
-          (t.ai_summary && JSON.stringify(t.ai_summary).toLowerCase().includes(q));
-      });
-    }
-    return tickets;
-  }, [tickets, searchMode, searchQuery]);
-
-  // Render a ticket item card
-  const renderTicketItem = (ticket) => {
-    const isSelected = activeTicketId === ticket.id;
-    const isUnread = !ticket.is_read || ticket.is_read === 0;
-    const isResolved = ticket.status === 'resolved';
-    const siteName = ticket.site_name || `Site #${ticket.site_id || 1}`;
-    const priority = (ticket.priority || 'medium').toLowerCase();
-    const channel = ticket.channel_type || 'widget';
-
-    return (
-      <div
-        key={ticket.id}
-        onClick={() => onSelectTicket(ticket.id)}
-        className={`p-3 border-b border-gray-100 cursor-pointer transition relative select-none ${
-          isSelected
-            ? 'bg-blue-50/90 border-l-4 border-l-blue-600 shadow-2xs'
-            : isUnread
-            ? 'bg-red-50/40 border-l-4 border-l-red-500 hover:bg-red-50/70'
-            : 'border-l-4 border-l-transparent hover:bg-gray-50'
-        } ${isResolved ? 'opacity-70' : ''}`}
-      >
-        <div className="flex items-start gap-2.5">
-          {/* Channel Icon Badge */}
-          <div className="relative flex-shrink-0 mt-0.5">
-            <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold shadow-2xs ${
-              channel === 'software'
-                ? 'bg-rose-100 text-rose-700 border border-rose-200'
-                : channel === 'telegram'
-                ? 'bg-sky-100 text-sky-700 border border-sky-200'
-                : channel === 'email'
-                ? 'bg-amber-100 text-amber-700 border border-amber-200'
-                : 'bg-blue-100 text-blue-700 border border-blue-200'
-            }`}>
-              {channel === 'software' ? '💻' : channel === 'telegram' ? '✈️' : channel === 'email' ? '✉️' : '🎫'}
-            </div>
-            {isUnread && (
-              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-600 rounded-full ring-2 ring-white animate-pulse" />
-            )}
-          </div>
-
-          {/* Ticket Body */}
-          <div className="flex-1 min-w-0">
-            {/* Top row: Site Badge & Priority Pill */}
-            <div className="flex items-center justify-between gap-1 mb-1">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="text-[11px] font-bold text-gray-700 truncate bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
-                  🌐 {siteName}
-                </span>
-                <span className="text-[10px] text-gray-400 font-mono">
-                  #{ticket.id}
-                </span>
-              </div>
-
-              <div className="flex items-center gap-1 flex-shrink-0">
-                {isUnread && (
-                  <span className="bg-red-600 text-white text-[9px] font-black px-1.5 py-0.2 rounded-full shadow-xs animate-pulse">
-                    NEW
-                  </span>
-                )}
-                {priority === 'critical' || priority === 'high' ? (
-                  <span className="text-[10px] bg-rose-50 text-rose-700 px-1.5 py-0.2 rounded border border-rose-200 font-bold uppercase">
-                    HIGH
-                  </span>
-                ) : priority === 'medium' ? (
-                  <span className="text-[10px] bg-amber-50 text-amber-700 px-1.5 py-0.2 rounded border border-amber-200 font-medium uppercase">
-                    MED
-                  </span>
-                ) : (
-                  <span className="text-[10px] bg-slate-50 text-slate-600 px-1.5 py-0.2 rounded border border-slate-200 font-medium uppercase">
-                    LOW
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Subject Title */}
-            <div className={`text-xs line-clamp-2 mb-1 ${
-              isUnread ? 'font-bold text-gray-950' : 'font-medium text-gray-700'
-            }`}>
-              {ticket.subject || 'Support Ticket'}
-            </div>
-
-            {/* Bottom Row: Status & Timestamp */}
-            <div className="flex items-center justify-between text-[10px] text-gray-400">
-              <span className={`inline-flex items-center gap-1 font-semibold ${
-                isResolved ? 'text-emerald-600' : 'text-blue-600'
-              }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${isResolved ? 'bg-emerald-500' : 'bg-blue-500'}`} />
-                {isResolved ? 'Resolved' : 'Open'}
-              </span>
-              <span>{getTimeString(ticket.created_at, config?.timeFormat, config?.timezone)}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   return (
     <aside className="w-80 bg-white border-r border-gray-200 flex flex-col h-full">
       {/* Header */}
@@ -393,7 +242,7 @@ export function Sidebar({
               onChange={(e) => handleSearchInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Escape') closeSearch(); }}
               maxLength={100}
-              placeholder={activeChannelTab === 'tickets' ? 'Search tickets by ID, site, bug log...' : t('sidebar.searchPlaceholder')}
+              placeholder={t('sidebar.searchPlaceholder')}
               className="flex-1 outline-none text-gray-800 placeholder-gray-400 bg-transparent text-sm"
             />
             {/* Close button on right */}
@@ -413,40 +262,9 @@ export function Sidebar({
             </div>
           )}
         </div>
-      ) : activeChannelTab === 'tickets' ? (
-        <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-          <div className="flex items-center gap-2 min-w-0">
-            <h1 className="text-xl font-bold text-gray-800">Support Tickets</h1>
-            <span className="text-xs bg-purple-100 text-purple-700 font-bold px-2 py-0.5 rounded-full">
-              {tickets.length}
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5 flex-shrink-0">
-            {/* Clear All Tickets button */}
-            <button
-              onClick={onClearAllTickets}
-              disabled={tickets.length === 0}
-              className="px-2.5 py-1 text-xs font-semibold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
-              title="Clear all tickets from Turso database"
-            >
-              <span>🗑️</span>
-              <span className="hidden sm:inline">Clear All</span>
-            </button>
-            {/* Search button */}
-            <button
-              onClick={openSearch}
-              className="p-1.5 text-gray-500 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition"
-              title="Search Tickets"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-            </button>
-          </div>
-        </div>
       ) : (
         <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-          <h1 className="text-xl font-bold text-gray-800">{t('sidebar.title')}</h1>
+          <div className="flex items-center gap-2"><h1 className="text-xl font-bold text-gray-800">{activeBrand?.label || 'Telegram Chats'}</h1><span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-600">{sortedChannelUsers.length}</span></div>
           <div className="flex items-center gap-1">
             {/* ONLY keep Search button */}
             <button
@@ -464,19 +282,7 @@ export function Sidebar({
 
       {/* User list / Tickets list / Search results */}
       <div className="flex-1 overflow-y-auto">
-        {activeChannelTab === 'tickets' ? (
-          filteredTickets.length === 0 ? (
-            <div className="p-8 text-center space-y-2">
-              <div className="text-3xl mb-1">🎫</div>
-              <div className="text-gray-600 font-semibold text-sm">No Tickets Found</div>
-              <div className="text-gray-400 text-xs">
-                {searchMode && searchQuery ? 'No tickets matched your search query.' : 'All support tickets and bug reports are cleared.'}
-              </div>
-            </div>
-          ) : (
-            filteredTickets.map(renderTicketItem)
-          )
-        ) : searchMode ? (
+        {searchMode ? (
           <>
             {searchQuery.trim().length < 2 ? (
               <div className="p-4 text-gray-400 text-center text-sm">
@@ -494,53 +300,22 @@ export function Sidebar({
           </>
         ) : (
           <>
-            {/* Active Channel Filter Strip */}
-            {activeChannelTab && activeChannelTab !== 'all' && activeChannelTab !== 'tickets' && (
-              <div className="px-3 py-2 bg-blue-50/80 border-b border-blue-100 flex items-center justify-between text-xs text-blue-900">
-                <span className="font-semibold flex items-center gap-1.5">
-                  <span className="capitalize">{activeChannelTab} Chats</span>
-                  <span className="text-[10px] bg-blue-200 text-blue-800 px-1.5 py-0.2 rounded-full font-bold">
-                    {channelFilteredUsers.length}
-                  </span>
-                </span>
-                {onSelectChannelTab && (
-                  <button
-                    type="button"
-                    onClick={() => onSelectChannelTab('all')}
-                    className="text-[11px] text-blue-600 hover:underline font-medium"
-                  >
-                    Show All
-                  </button>
-                )}
-              </div>
-            )}
-
             {channelFilteredUsers.length === 0 ? (
               <div className="p-6 text-center space-y-2">
                 <div className="text-gray-400 text-sm">
-                  {users.length === 0
-                    ? t('sidebar.noChats')
-                    : `No active ${activeChannelTab} chats.`}
+                  {`No ${activeBrand?.label || 'Telegram'} chats yet.`}
                 </div>
-                {activeChannelTab !== 'all' && onSelectChannelTab && users.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => onSelectChannelTab('all')}
-                    className="text-xs text-blue-600 hover:underline font-semibold block mx-auto"
-                  >
-                    View All Chats ({users.length})
-                  </button>
-                )}
               </div>
             ) : (
-              channelFilteredUsers.map((userId) => {
+              sortedChannelUsers.map((userId) => {
+
                 const online = isUserOnline(userId);
                 const info = usersInfo[userId] || {};
                 const channel = getUserChannel(userId, info);
-                const aiStatus = state.sessionAiStatuses?.[userId];
-                const isEscalated = aiStatus === 'escalated' || aiStatus === 'human_active';
                 const unreadCount = Number(notifications[userId]) || (notifications[userId] ? 1 : 0);
                 const hasUnread = unreadCount > 0;
+                const chatTickets = ticketsForChat(tickets, userId, info);
+                const openTicketCount = chatTickets.filter(ticket => ticket.status !== 'resolved').length;
 
                 return (
                   <div
@@ -585,6 +360,11 @@ export function Sidebar({
                                 {getBotName(userId)}
                               </span>
                             )}
+                            {chatTickets.length > 0 && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-semibold flex-shrink-0 ${openTicketCount ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-gray-50 text-gray-600 border-gray-200'}`} title={`${chatTickets.length} support ticket${chatTickets.length === 1 ? '' : 's'} in this chat`}>
+                                🎫 {openTicketCount || chatTickets.length}
+                              </span>
+                            )}
                             {/* Online & tab active indicator */}
                             {online && (
                               <span title={isTabActive(userId) ? t('sidebar.tabActive') : t('sidebar.tabBackground')}>
@@ -618,11 +398,10 @@ export function Sidebar({
                                 {unreadCount} new
                               </span>
                             )}
-                            {isEscalated ? (
-                              <span className="text-[10px] bg-rose-50 text-rose-700 px-1.5 py-0.5 rounded font-semibold border border-rose-200">
-                                ⚠️ Escalated
-                              </span>
-                            ) : channel === 'telegram' ? (
+                            <span className="text-[10px] bg-violet-50 text-violet-800 px-1.5 py-0.5 rounded font-semibold border border-violet-200 max-w-[92px] truncate" title={getConversationBrand(userId, info)}>
+                              {getConversationBrand(userId, info)}
+                            </span>
+                            {channel === 'telegram' ? (
                               <span className="text-[10px] bg-sky-50 text-sky-700 px-1.5 py-0.5 rounded font-medium border border-sky-200">
                                 ✈️ Telegram
                               </span>
@@ -683,7 +462,7 @@ export function Sidebar({
                       </button>
                     </div>
                   </div>
-                );
+                  );
               })
             )}
           </>

@@ -7,8 +7,10 @@ export function EditUserModal({ isOpen, onClose, userId, userInfo, onSave }) {
   const [name, setName] = useState('');
   const [notes, setNotes] = useState('');
 
+  // Reset form fields when opening the selected user's edit dialog.
   useEffect(() => {
     if (isOpen && userInfo) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setName(userInfo.user_name || userInfo.name || '');
       setNotes(userInfo.admin_notes || '');
     }
