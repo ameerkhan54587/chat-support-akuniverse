@@ -7,6 +7,7 @@ const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const maxmind = require('maxmind');
 const nodemailer = require('nodemailer');
+const { pollTelegramBots } = require('./telegram-polling');
 
 // Anonymous name generator (deprecated - widget now asks for name via form)
 // const ANON_ADJECTIVES = [
@@ -629,27 +630,23 @@ async function pollTelegramUpdates() {
     }
 
     telegramPollInFlight = true;
+    let hadBotErrors = false;
     try {
-        for (const bot of telegramBots.filter(item => item.enabled && item.botToken)) {
-            const updates = await callTelegramApi('getUpdates', {
-                offset: (bot.lastUpdateId || 0) + 1,
-                timeout: 0,
-                allowed_updates: ['message']
-            }, bot);
-
-            if (Array.isArray(updates) && updates.length > 0) {
-                for (const update of updates) {
-                    bot.lastUpdateId = update.update_id;
-                    await processTelegramUpdate(update, bot);
-                }
-            }
-        }
-        await new Promise((resolve) => saveTelegramConfig(resolve));
+        const result = await pollTelegramBots({
+            bots: activeBots,
+            callApi: callTelegramApi,
+            processUpdate: processTelegramUpdate,
+            saveConfig: () => new Promise((resolve, reject) => {
+                saveTelegramConfig((error) => error ? reject(error) : resolve());
+            }),
+            logError: (message) => console.error(message),
+        });
+        hadBotErrors = result.hadErrors;
     } finally {
         telegramPollInFlight = false;
     }
 
-    scheduleTelegramPoll(0);
+    scheduleTelegramPoll(hadBotErrors ? 5000 : 0);
 }
 
 async function startTelegramBot(skipBacklog = false) {
