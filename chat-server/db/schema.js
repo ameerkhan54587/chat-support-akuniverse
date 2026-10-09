@@ -65,6 +65,13 @@ async function initDatabase(db) {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
 
+    await db.runAsync(`CREATE TABLE IF NOT EXISTS blocked_telegram_users (
+        site_id TEXT NOT NULL,
+        chat_id TEXT NOT NULL,
+        blocked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (site_id, chat_id)
+    )`);
+
     await db.runAsync(`CREATE TABLE IF NOT EXISTS external_messages (
         source TEXT NOT NULL,
         source_message_id TEXT NOT NULL,
@@ -72,6 +79,13 @@ async function initDatabase(db) {
         message_id INTEGER,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (source, source_message_id)
+    )`);
+
+    await db.runAsync(`CREATE TABLE IF NOT EXISTS admin_reply_keys (
+        session_id TEXT NOT NULL,
+        client_message_id TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (session_id, client_message_id)
     )`);
 
     await db.runAsync(`CREATE TABLE IF NOT EXISTS ingest_nonces (

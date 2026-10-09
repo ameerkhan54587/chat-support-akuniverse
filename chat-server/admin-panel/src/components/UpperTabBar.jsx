@@ -13,6 +13,8 @@ export function UpperTabBar({
   pushEnabled = false,
   pushPermission = 'default',
   onTogglePush,
+  darkMode = true,
+  onToggleDarkMode,
 }) {
   const { t } = useTranslation();
 
@@ -153,6 +155,8 @@ export function UpperTabBar({
           <span>📖</span>
           <span className="hidden md:inline">Docs</span>
         </button>
+
+        <button type="button" onClick={onToggleDarkMode} className="p-1.5 rounded-lg border text-gray-600 bg-gray-50 border-gray-200" title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'} aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}>{darkMode ? '☀️' : '🌙'}</button>
 
         {/* Sound Toggle */}
         <button

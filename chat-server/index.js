@@ -395,6 +395,7 @@ function saveMessage(sessionId, sender, text, timestamp, callback) {
     db.run("INSERT INTO messages (session_id, sender, text, timestamp) VALUES (?, ?, ?, ?)",
         [sessionId, sender, text, timestamp],
         function(err) {
+            if (!err) db.run("UPDATE sessions SET updated_at = ? WHERE session_id = ?", [timestamp, sessionId]);
             if (!err && callback) callback(this.lastID);
         }
     );
@@ -596,6 +597,10 @@ async function processTelegramUpdate(update, bot) {
     if (message.from && message.from.is_bot) {
         return;
     }
+    if (message.chat.type === 'private' && bot.siteId) {
+        const blocked = await db.getAsync('SELECT 1 AS blocked FROM blocked_telegram_users WHERE site_id = ? AND chat_id = ?', [String(bot.siteId), String(message.chat.id)]).catch(() => null);
+        if (blocked) return;
+    }
 
     const text = String(message.text || '').trim();
     if (!text) {
@@ -608,13 +613,14 @@ async function processTelegramUpdate(update, bot) {
     if (message.chat.type === 'private') {
         const targetId = `telegram:${bot.id}:${message.chat.id}`;
         const metadata = {
-            user_name: message.chat.first_name || message.from?.first_name || message.chat.username || 'Telegram user',
+            user_name: [message.chat.first_name, message.chat.last_name].filter(Boolean).join(' ') || message.chat.username || 'Telegram user',
             user_id: String(message.chat.id),
             user_username: message.chat.username || message.from?.username || '',
             source: 'telegram',
             channel: 'telegram',
             telegram_bot_id: bot.id,
             telegram_bot_name: bot.name || bot.username || 'Telegram bot',
+            telegram_photo_url: message.from?.photo_url || message.chat.photo_url || '',
             user_session: targetId,
             site_id: bot.siteId || (bot.id && bot.id.startsWith('site_') ? bot.id.replace('site_', '') : ''),
         };
@@ -778,6 +784,41 @@ function getAllSessions(callback) {
                 ) m2 ON m1.id = m2.max_id
             ) lm ON s.session_id = lm.session_id
             ORDER BY s.updated_at DESC`, [], (err, rows) => { if (!err) callback(rows); });
+}
+
+function runAdminReply(targetId, rawText, ws) {
+    const text = typeof rawText === 'string' ? rawText.trim() : '';
+    const sendResult = async () => {
+        if (!targetId.startsWith('telegram:')) return { success: true };
+        const match = /^telegram:site_([a-z0-9_-]{1,64}):(-?\d{1,32})$/i.exec(targetId);
+        if (!match) throw new Error('Invalid Telegram chat target.');
+        const siteId = match[1].toLowerCase();
+        const chatId = match[2];
+        const metadata = clientInfo.get(targetId) || {};
+        const bot = getTelegramBot(metadata.telegram_bot_id || `site_${siteId}`);
+        if (siteId === 'smsotps') {
+            const site = configLoader.getSiteById(siteId);
+            const result = await sendSiteReply({ siteId, secret: site?.handoff_secret, apiKey: site?.api_key, chatId, text });
+            if (!result.success) throw new Error(result.error === 'site_rejected' ? `SMSOTPS rejected reply (${result.status}).` : 'SMSOTPS reply endpoint is not configured or unavailable.');
+            return result;
+        }
+        await callTelegramApi('sendMessage', { chat_id: chatId, text }, bot);
+        if (bot?.siteId && bot.handoff_secret) {
+            const result = await notifySiteHandoff({ siteId: bot.siteId, secret: bot.handoff_secret, apiKey: bot.api_key, chatId });
+            if (result.error) console.warn(`[Handoff] Site ${bot.siteId}: ${result.error}${result.status ? ` (${result.status})` : ''}`);
+        }
+        return { success: true };
+    };
+    sendResult().then(() => {
+        const timestamp = new Date().toISOString();
+        saveMessage(targetId, 'internal_team', text, timestamp, (newId) => {
+            sendToUserTabs(targetId, { text, sender: 'internal_team', timestamp, id: newId });
+            broadcastToAdmins({ type: 'admin_msg_sent', targetId, text, sender: 'internal_team', timestamp, id: newId });
+        });
+    }).catch((error) => {
+        console.warn(`[Admin reply] ${String(error?.message || 'unknown').slice(0, 160)}`);
+        ws.send(JSON.stringify({ type: 'system', text: `Reply failed: ${String(error?.message || 'unknown').slice(0, 160)}` }));
+    });
 }
 
 function sendToUserTabs(userId, data) {
@@ -1306,6 +1347,27 @@ app.delete('/api/sites/:id', requireAdminAuth, (req, res) => {
 });
 
 // Tickets Management
+app.get('/api/telegram/users/:siteId/:chatId/status', requireAdminAuth, async (req, res) => {
+    try {
+        const row = await db.getAsync('SELECT 1 AS blocked FROM blocked_telegram_users WHERE site_id = ? AND chat_id = ?', [String(req.params.siteId).toLowerCase(), String(req.params.chatId)]);
+        res.json({ blocked: Boolean(row) });
+    } catch { res.status(500).json({ error: 'db_error' }); }
+});
+
+app.put('/api/telegram/users/:siteId/:chatId/block', requireAdminAuth, async (req, res) => {
+    try {
+        await db.runAsync('INSERT INTO blocked_telegram_users (site_id, chat_id) VALUES (?, ?) ON CONFLICT(site_id, chat_id) DO NOTHING', [String(req.params.siteId).toLowerCase(), String(req.params.chatId)]);
+        res.json({ blocked: true });
+    } catch { res.status(500).json({ error: 'db_error' }); }
+});
+
+app.delete('/api/telegram/users/:siteId/:chatId/block', requireAdminAuth, async (req, res) => {
+    try {
+        await db.runAsync('DELETE FROM blocked_telegram_users WHERE site_id = ? AND chat_id = ?', [String(req.params.siteId).toLowerCase(), String(req.params.chatId)]);
+        res.json({ blocked: false });
+    } catch { res.status(500).json({ error: 'db_error' }); }
+});
+
 app.post('/api/sites/:site_id/tickets', requireAdminAuth, (req, res) => {
     const { session_id, channel_type, subject, priority } = req.body;
     const site_id = req.params.site_id;
@@ -1772,37 +1834,17 @@ wss.on('connection', (ws, req) => {
                                 ws.send(JSON.stringify({ type: 'system', text: 'Reply must be between 1 and 4000 characters.' }));
                                 return;
                             }
-                            const sendResult = async () => {
-                                if (!targetId.startsWith('telegram:')) return { success: true };
-                                const match = /^telegram:site_([a-z0-9_-]{1,64}):(-?\d{1,32})$/i.exec(targetId);
-                                if (!match) throw new Error('Invalid Telegram chat target.');
-                                const siteId = match[1].toLowerCase();
-                                const chatId = match[2];
-                                const metadata = clientInfo.get(targetId) || {};
-                                const bot = getTelegramBot(metadata.telegram_bot_id || `site_${siteId}`);
-                                if (siteId === 'smsotps') {
-                                    const site = configLoader.getSiteById(siteId);
-                                    const result = await sendSiteReply({ siteId, secret: site?.handoff_secret, apiKey: site?.api_key, chatId, text });
-                                    if (!result.success) throw new Error(result.error === 'site_rejected' ? `SMSOTPS rejected reply (${result.status}).` : 'SMSOTPS reply endpoint is not configured or unavailable.');
-                                    return result;
-                                }
-                                await callTelegramApi('sendMessage', { chat_id: chatId, text }, bot);
-                                if (bot?.siteId && bot.handoff_secret) {
-                                    const result = await notifySiteHandoff({ siteId: bot.siteId, secret: bot.handoff_secret, apiKey: bot.api_key, chatId });
-                                    if (result.error) console.warn(`[Handoff] Site ${bot.siteId}: ${result.error}${result.status ? ` (${result.status})` : ''}`);
-                                }
-                                return { success: true };
-                            };
-                            sendResult().then(() => {
-                                const timestamp = new Date().toISOString();
-                                saveMessage(targetId, 'internal_team', text, timestamp, (newId) => {
-                                    sendToUserTabs(targetId, { text, sender: 'internal_team', timestamp, id: newId });
-                                    broadcastToAdmins({ type: 'admin_msg_sent', targetId, text, sender: 'internal_team', timestamp, id: newId });
-                                });
-                            }).catch((error) => {
-                                console.warn(`[Admin reply] ${String(error?.message || 'unknown').slice(0, 160)}`);
-                                ws.send(JSON.stringify({ type: 'system', text: `Reply failed: ${String(error?.message || 'unknown').slice(0, 160)}` }));
+                            const clientMessageId = typeof data.clientMessageId === 'string' ? data.clientMessageId.slice(0, 120) : '';
+                            if (!clientMessageId) {
+                                ws.send(JSON.stringify({ type: 'system', text: 'Reply missing its request ID. Please retry.' }));
+                                return;
+                            }
+                            db.run('INSERT INTO admin_reply_keys (session_id, client_message_id) VALUES (?, ?) ON CONFLICT(session_id, client_message_id) DO NOTHING', [targetId, clientMessageId], function(err) {
+                                if (err) { ws.send(JSON.stringify({ type: 'system', text: 'Reply could not be queued safely. Please retry.' })); return; }
+                                if (this.changes === 0) return;
+                                runAdminReply(targetId, data.text, ws);
                             });
+                            return;
                         }
 
 

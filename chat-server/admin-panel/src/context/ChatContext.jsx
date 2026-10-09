@@ -87,6 +87,11 @@ function chatReducer(state, action) {
         usersInfo: { ...state.usersInfo, [action.payload]: {} },
       };
 
+    case 'MOVE_USER_TO_TOP': {
+      const id = action.payload;
+      return { ...state, users: [id, ...state.users.filter(userId => userId !== id)] };
+    }
+
     case 'UPDATE_USER_INFO':
       return {
         ...state,
@@ -151,12 +156,14 @@ function chatReducer(state, action) {
     case 'ADD_MESSAGE': {
       const msg = action.payload;
       const updateLastMessage = msg.sender !== 'system' && msg.userId;
+      const nextUsers = updateLastMessage ? [msg.userId, ...state.users.filter(id => id !== msg.userId)] : state.users;
       const isUnreadClient = msg.userId !== state.activeUserId && msg.sender === 'client';
       const prevUnread = Number(state.notifications[msg.userId]) || 0;
 
       return {
         ...state,
         messages: [...state.messages, msg],
+        users: nextUsers,
         notifications: isUnreadClient
           ? { ...state.notifications, [msg.userId]: prevUnread + 1 }
           : state.notifications,
@@ -248,6 +255,10 @@ export function ChatProvider({ children }) {
     dispatch({ type: 'SET_USERS', payload: users });
   }, []);
 
+  const moveUserToTop = useCallback((userId) => {
+    dispatch({ type: 'MOVE_USER_TO_TOP', payload: userId });
+  }, []);
+
   const addUser = useCallback((userId) => {
     dispatch({ type: 'ADD_USER', payload: userId });
   }, []);
@@ -318,6 +329,7 @@ export function ChatProvider({ children }) {
     setConfig,
     setUsers,
     addUser,
+    moveUserToTop,
     updateUserInfo,
     removeUser,
     setActiveUser,

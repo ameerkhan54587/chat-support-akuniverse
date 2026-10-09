@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { ChatProvider, useChat } from './context/ChatContext';
 import { useWebSocket } from './hooks/useWebSocket';
 import { I18nProvider, useTranslation } from './i18n';
@@ -36,6 +36,36 @@ function AppContent() {
   });
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => isNotificationEnabled());
   const [pushPermission, setPushPermission] = useState(() => getNotificationPermission());
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('console_dark_mode') !== 'false');
+  const [telegramBlocked, setTelegramBlocked] = useState(false);
+  const [telegramMuted, setTelegramMuted] = useState(() => new Set(JSON.parse(localStorage.getItem('console_muted_conversations') || '[]')));
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', darkMode);
+    localStorage.setItem('console_dark_mode', String(darkMode));
+  }, [darkMode]);
+
+  const currentInfo = state.usersInfo[state.activeUserId] || {};
+  const telegramSiteId = currentInfo.site_id;
+  const telegramChatId = currentInfo.user_id;
+  const telegramIdentity = useMemo(() => state.activeUserId?.startsWith('telegram:') && telegramSiteId && telegramChatId ? { siteId: telegramSiteId, chatId: telegramChatId } : null, [state.activeUserId, telegramSiteId, telegramChatId]);
+  useEffect(() => {
+    if (!telegramIdentity || !state.config.apiToken) return;
+    let cancelled = false;
+    fetch(`/api/telegram/users/${encodeURIComponent(telegramSiteId)}/${encodeURIComponent(telegramChatId)}/status`, { headers: { Authorization: `Bearer ${state.config.apiToken}` } }).then(r => r.ok ? r.json() : null).then(data => { if (!cancelled && data) setTelegramBlocked(Boolean(data.blocked)); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [telegramIdentity, telegramSiteId, telegramChatId, state.config.apiToken]);
+  const toggleTelegramBlock = async () => {
+    if (!telegramIdentity) return;
+    const method = telegramBlocked ? 'DELETE' : 'PUT';
+    const response = await fetch(`/api/telegram/users/${encodeURIComponent(telegramIdentity.siteId)}/${encodeURIComponent(telegramIdentity.chatId)}/block`, { method, headers: { Authorization: `Bearer ${state.config.apiToken}` } });
+    if (response.ok) setTelegramBlocked(!telegramBlocked);
+  };
+  const toggleTelegramMute = () => {
+    if (!state.activeUserId) return;
+    const next = new Set(telegramMuted);
+    if (next.has(state.activeUserId)) next.delete(state.activeUserId); else next.add(state.activeUserId);
+    setTelegramMuted(next); localStorage.setItem('console_muted_conversations', JSON.stringify([...next]));
+  };
 
   // Fetch full tickets list
   const fetchTickets = useCallback(async () => {
@@ -278,8 +308,11 @@ function AppContent() {
     deleteSession(userId);
   };
 
+  const replyIdRef = useRef(0);
   const handleSendMessage = (targetId, text) => {
-    sendReply(targetId, text);
+    replyIdRef.current += 1;
+    const clientMessageId = `${targetId}:${Date.now()}:${replyIdRef.current}`;
+    sendReply(targetId, text, clientMessageId);
   };
 
   const handleDeleteMessage = (msgId, targetId) => {
@@ -365,6 +398,8 @@ function AppContent() {
         pushEnabled={notificationsEnabled && pushPermission === 'granted'}
         pushPermission={pushPermission}
         onTogglePush={handleTogglePush}
+        darkMode={darkMode}
+        onToggleDarkMode={() => setDarkMode(value => !value)}
       />
 
       {/* Main Workspace */}
@@ -410,6 +445,10 @@ function AppContent() {
             onDeleteMessage={handleDeleteMessage}
             onLoadMore={handleLoadMore}
             onDeleteSystemMessages={handleDeleteSystemMessages}
+            telegramBlocked={telegramBlocked}
+            onToggleTelegramBlock={toggleTelegramBlock}
+            telegramMuted={telegramMuted.has(state.activeUserId)}
+            onToggleTelegramMute={toggleTelegramMute}
             onOpenSidebar={() => setSidebarOpen(true)}
             sidebarOpen={sidebarOpen}
             onAdminTyping={sendAdminTyping}

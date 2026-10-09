@@ -116,7 +116,7 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
         }
         break;
 
-      case 'client_msg':
+      case 'client_msg': {
         // Add user first (before updating info to avoid overwriting)
         addUser(data.from);
         // Mark user as online since they sent a message
@@ -125,6 +125,7 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
         if (data.info) {
           updateUserInfo(data.from, data.info);
         }
+        updateUserInfo(data.from, { lastMessage: { text: data.text, timestamp: data.timestamp, sender: 'client' } });
         // Add message only if it's from the active chat
         if (data.from === activeUserIdRef.current) {
           addMessage({
@@ -135,27 +136,27 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
             timestamp: data.timestamp,
           });
         }
-        // Always update notification and lastMessage for non-active chats
+        // Keep unread state current for chats outside the active conversation
         if (data.from !== activeUserIdRef.current) {
           setNotification(data.from, true);
-          updateUserInfo(data.from, {
-            lastMessage: { text: data.text, timestamp: data.timestamp, sender: 'client' },
-          });
         }
         // Play notification sound and flash tab title
-        if (soundEnabledRef.current) {
+        const mutedChats = new Set(JSON.parse(localStorage.getItem('console_muted_conversations') || '[]'));
+        const isMuted = mutedChats.has(data.from);
+        if (!isMuted && soundEnabledRef.current) {
           playNotificationSound();
         }
-        startTitleFlash();
+        if (!isMuted) startTitleFlash();
         // Desktop Web Push Browser notification
         {
           const info = data.info || usersInfoRef.current[data.from] || {};
           const name = info.user_name || info.name || data.from;
-          showBrowserNotification(`💬 ${name}`, data.text, data.from, {
+          if (!isMuted) showBrowserNotification(`💬 ${name}`, data.text, data.from, {
             activeUserId: activeUserIdRef.current
           });
         }
         break;
+      }
 
       case 'client_typing':
         if (data.userId === activeUserIdRef.current) {
@@ -211,7 +212,7 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
         break;
 
       case 'api_msg_sent':
-      case 'admin_msg_sent':
+      case 'admin_msg_sent': {
         if (data.info) updateUserInfo(data.targetId, data.info);
         const outboundSender = data.sender || (data.type === 'admin_msg_sent' ? 'internal_team' : 'support');
         if (data.targetId === activeUserIdRef.current) {
@@ -223,12 +224,10 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
             timestamp: data.timestamp,
           });
         } else {
-          // Update lastMessage for non-active user (e.g. API-sent messages)
-          updateUserInfo(data.targetId, {
-            lastMessage: { text: data.text, timestamp: data.timestamp, sender: outboundSender },
-          });
+          updateUserInfo(data.targetId, { lastMessage: { text: data.text, timestamp: data.timestamp, sender: outboundSender } });
         }
         break;
+      }
 
       case 'new_ticket':
         if (soundEnabledRef.current) {
@@ -518,8 +517,8 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
     }
   }, []);
 
-  const sendReply = useCallback((targetId, text) => {
-    send({ type: 'admin_reply', targetId, text });
+  const sendReply = useCallback((targetId, text, clientMessageId) => {
+    send({ type: 'admin_reply', targetId, text, clientMessageId });
   }, [send]);
 
   const getHistory = useCallback((targetId) => {

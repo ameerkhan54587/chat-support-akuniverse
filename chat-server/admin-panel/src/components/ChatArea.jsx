@@ -5,7 +5,7 @@ import { Message } from './Message';
 import { SystemMessage } from './SystemMessage';
 import { isDifferentDay, getDateDivider } from '../utils/dateUtils';
 
-export function ChatArea({ onSendMessage, onDeleteMessage, onLoadMore, onDeleteSystemMessages, onOpenSidebar, onAdminTyping, tickets = [], onTicketViewed, onTicketStatusChange }) {
+export function ChatArea({ onSendMessage, onDeleteMessage, onLoadMore, onDeleteSystemMessages, onOpenSidebar, onAdminTyping, tickets = [], onTicketViewed, onTicketStatusChange, telegramBlocked = false, onToggleTelegramBlock, telegramMuted = false, onToggleTelegramMute }) {
   const { state } = useChat();
   const { t } = useTranslation();
   const { activeUserId, messages, usersInfo, typingText, config, hasMoreMessages, loadingMoreMessages } = state;
@@ -225,6 +225,10 @@ export function ChatArea({ onSendMessage, onDeleteMessage, onLoadMore, onDeleteS
             })()}
 
           </div>
+          {userInfo?.source === 'telegram' && <div className="flex gap-2">
+            <button type="button" onClick={onToggleTelegramBlock} className="text-xs rounded border px-2 py-1">{telegramBlocked ? 'Unblock' : 'Block'}</button>
+            <button type="button" onClick={onToggleTelegramMute} className="text-xs rounded border px-2 py-1">{telegramMuted ? 'Unmute' : 'Mute'}</button>
+          </div>}
           <button
             onClick={onDeleteSystemMessages}
             className="text-xs text-gray-400 hover:text-red-500 transition"

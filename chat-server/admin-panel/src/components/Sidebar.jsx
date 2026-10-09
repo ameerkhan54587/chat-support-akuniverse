@@ -18,7 +18,7 @@ export function Sidebar({
   onSearch,
   onSearchResultsHandler,
   activeChannelTab = 'brand:fbverse_bot',
-  tickets = []
+  tickets = [],
 }) {
   const { state } = useChat();
   const { t } = useTranslation();
@@ -29,6 +29,7 @@ export function Sidebar({
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [editUserId, setEditUserId] = useState(null);
 
+
   // Search state
   const [searchMode, setSearchMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -38,7 +39,11 @@ export function Sidebar({
   const debounceTimerRef = useRef(null);
   const lastSearchQueryRef = useRef('');
 
-  const sortedChannelUsers = useMemo(() => [...channelFilteredUsers].sort((a, b) => (onlineUsers[b] ? 1 : 0) - (onlineUsers[a] ? 1 : 0)), [channelFilteredUsers, onlineUsers]);
+  const sortedChannelUsers = useMemo(() => [...channelFilteredUsers].sort((a, b) => {
+    const at = new Date(usersInfo[a]?.lastMessage?.timestamp || 0).getTime();
+    const bt = new Date(usersInfo[b]?.lastMessage?.timestamp || 0).getTime();
+    return bt - at || ((onlineUsers[b] ? 1 : 0) - (onlineUsers[a] ? 1 : 0));
+  }), [channelFilteredUsers, onlineUsers, usersInfo]);
 
   const isUserOnline = (userId) => onlineUsers[userId] ?? false;
   const isTabActive = (userId) => tabActiveUsers[userId] ?? false;
@@ -161,7 +166,7 @@ export function Sidebar({
             <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${
               online ? 'bg-blue-600' : 'bg-gray-400'
             }`}>
-              {initial}
+              {info?.telegram_photo_url ? <img src={info.telegram_photo_url} alt="" className="w-10 h-10 rounded-full object-cover" /> : initial}
             </div>
             {hasUnread && (
               <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] px-1 bg-red-600 text-white rounded-full border-2 border-white text-[11px] font-black flex items-center justify-center shadow-xs animate-pulse z-10">
@@ -335,7 +340,7 @@ export function Sidebar({
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${
                           online ? 'bg-blue-600' : 'bg-gray-400'
                         }`}>
-                          {getInitial(userId)}
+                          {info.telegram_photo_url ? <img src={info.telegram_photo_url} alt="" className="w-10 h-10 rounded-full object-cover" /> : getInitial(userId)}
                         </div>
                         {hasUnread && (
                           <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] px-1 bg-red-600 text-white rounded-full border-2 border-white text-[11px] font-black flex items-center justify-center shadow-xs animate-pulse z-10">
