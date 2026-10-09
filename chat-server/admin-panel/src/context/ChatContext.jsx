@@ -5,6 +5,7 @@ const ChatContext = createContext(null);
 
 const initialState = {
   isAuthenticated: false,
+  isAuthChecking: true,
   users: [],
   usersInfo: {},
   onlineUsers: {}, // Track online status: { odUserId: true/false }
@@ -49,7 +50,10 @@ const initialState = {
 function chatReducer(state, action) {
   switch (action.type) {
     case 'SET_AUTHENTICATED':
-      return { ...state, isAuthenticated: action.payload };
+      return { ...state, isAuthenticated: action.payload, isAuthChecking: false };
+
+    case 'SET_AUTH_CHECKING':
+      return { ...state, isAuthChecking: action.payload };
 
     case 'SET_CONFIG':
       return { ...state, config: { ...state.config, ...action.payload } };
@@ -247,6 +251,10 @@ export function ChatProvider({ children }) {
     dispatch({ type: 'SET_AUTHENTICATED', payload: value });
   }, []);
 
+  const setAuthChecking = useCallback((value) => {
+    dispatch({ type: 'SET_AUTH_CHECKING', payload: value });
+  }, []);
+
   const setConfig = useCallback((config) => {
     dispatch({ type: 'SET_CONFIG', payload: config });
   }, []);
@@ -326,6 +334,7 @@ export function ChatProvider({ children }) {
   const value = {
     state,
     setAuthenticated,
+    setAuthChecking,
     setConfig,
     setUsers,
     addUser,

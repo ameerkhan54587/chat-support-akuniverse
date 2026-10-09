@@ -20,6 +20,7 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
   const {
     state,
     setAuthenticated,
+    setAuthChecking,
     setConfig,
     setUsers,
     addUser,
@@ -423,10 +424,9 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
                 localStorage.setItem('ak_chat_session_token', data.sessionToken);
               }
             }
-            if (rememberMe && !isSession) {
-              localStorage.setItem('ak_chat_admin_pass', credential);
-              localStorage.setItem('kaplia_admin_pass', credential);
-            }
+            // Legacy password persistence is intentionally disabled. Store session tokens only.
+            localStorage.removeItem('ak_chat_admin_pass');
+            localStorage.removeItem('kaplia_admin_pass');
             // Show toast only for initial login, not reconnects
             if (!silent && onSystemMessageRef.current) {
               onSystemMessageRef.current('Authentication successful!');
@@ -585,10 +585,14 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
   // Auto-connect on mount: prioritize Render disk session token, fallback to password
   useEffect(() => {
     const savedSessionToken = sessionStorage.getItem('ak_chat_session_token') || localStorage.getItem('ak_chat_session_token');
-    const savedPassword = localStorage.getItem('ak_chat_admin_pass') || localStorage.getItem('kaplia_admin_pass');
-    const authCredential = savedSessionToken || savedPassword;
+    // Clear legacy raw-password keys left by earlier releases, then restore only a session token.
+    localStorage.removeItem('ak_chat_admin_pass');
+    localStorage.removeItem('kaplia_admin_pass');
+    const authCredential = savedSessionToken;
     if (authCredential) {
-      connect(authCredential, null, false, true).catch(() => {}); // silent = true for auto-connect
+      connect(authCredential, null, false, true).catch(() => { setAuthenticated(false); setAuthChecking(false); }); // silent = true for auto-connect
+    } else {
+      setAuthChecking(false);
     }
 
     return () => {
@@ -599,7 +603,7 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
         wsRef.current.close();
       }
     };
-  }, [connect]);
+  }, [connect, setAuthenticated, setAuthChecking]);
 
   return {
     connect,

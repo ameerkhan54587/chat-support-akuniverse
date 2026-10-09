@@ -88,3 +88,10 @@ test('resolves legacy Telegram chats from site-prefixed session IDs when metadat
   assert.deepEqual(conversationsForBrand(users, {}, 'brand:smsactivate'), [users[1]]);
   assert.deepEqual(conversationsForBrand(users, {}, 'brand:fbverse_bot'), [users[2]]);
 });
+
+test('canonical SMSOTPs session prefix overrides stale conflicting brand metadata', () => {
+  assert.equal(
+    getConversationBrand('telegram:site_smsotps:8233251098', { site_id: 'smsactivate', telegram_bot_name: 'Generic Support' }),
+    'SMS OTPs'
+  );
+});

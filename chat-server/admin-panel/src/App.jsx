@@ -28,7 +28,11 @@ function AppContent() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [touchStart, setTouchStart] = useState(null);
   const [touchEnd, setTouchEnd] = useState(null);
-  const [activeChannelTab, setActiveChannelTab] = useState('brand:fbverse_bot');
+  const [activeChannelTab, setActiveChannelTab] = useState(() => {
+    const saved = localStorage.getItem('console_active_site_tab');
+    return TELEGRAM_BRAND_TABS.some(tab => tab.id === saved) ? saved : 'brand:fbverse_bot';
+  });
+  useEffect(() => { localStorage.setItem('console_active_site_tab', activeChannelTab); }, [activeChannelTab]);
   const [tickets, setTickets] = useState([]);
   const [soundEnabled, setSoundEnabled] = useState(() => {
     const saved = localStorage.getItem('kaplia_sound_enabled');
@@ -225,7 +229,12 @@ function AppContent() {
   }, [tickets, state.users, state.usersInfo, handleSelectUser, handleTicketViewed]);
 
   const handleSelectTab = (tabId) => {
-    if (TELEGRAM_BRAND_TABS.some(tab => tab.id === tabId)) setActiveChannelTab(tabId);
+    if (!TELEGRAM_BRAND_TABS.some(tab => tab.id === tabId)) return;
+    setActiveChannelTab(tabId);
+    const activeInfo = state.usersInfo[state.activeUserId] || {};
+    if (state.activeUserId && brandTabForConversation(state.activeUserId, activeInfo) !== tabId) {
+      setActiveUser(null);
+    }
   };
 
   const handleTogglePush = async () => {
@@ -368,6 +377,10 @@ function AppContent() {
       console.error('Failed to update ticket status', err);
     }
   }, [state.config.apiToken]);
+
+  if (state.isAuthChecking) {
+    return <div className="min-h-screen bg-gray-100 dark:bg-gray-950 flex items-center justify-center text-gray-500 dark:text-gray-300" aria-label="Restoring session"><div className="h-7 w-7 rounded-full border-2 border-gray-300 border-t-blue-600 animate-spin" /></div>;
+  }
 
   if (!state.isAuthenticated) {
     return (
