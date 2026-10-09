@@ -5,7 +5,8 @@ import { useTranslation } from '../i18n';
 import { getTimeString } from '../utils/dateUtils';
 import { ConfirmModal } from './ConfirmModal';
 import { EditUserModal } from './EditUserModal';
-import { ticketsForChat, conversationsForBrand, getConversationChannel, getConversationBrand, TELEGRAM_BRAND_TABS } from '../utils/ticketChat';
+import { ticketsForChat, conversationsForBrand, getConversationChannel, TELEGRAM_BRAND_TABS } from '../utils/ticketChat';
+import { ConsoleAvatar } from './ConsoleAvatar';
 
 export function getUserChannel(userId, info = {}) {
   return getConversationChannel(userId, info);
@@ -35,15 +36,33 @@ export function Sidebar({
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState(null);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [listFilter, setListFilter] = useState('all');
+  const [blockedChatIds, setBlockedChatIds] = useState(() => new Set());
   const searchInputRef = useRef(null);
   const debounceTimerRef = useRef(null);
   const lastSearchQueryRef = useRef('');
 
-  const sortedChannelUsers = useMemo(() => [...channelFilteredUsers].sort((a, b) => {
+  const [mutedIds, setMutedIds] = useState(() => { try { return new Set(JSON.parse(localStorage.getItem('console_muted_conversations') || '[]')); } catch { return new Set(); } });
+  useEffect(() => { const reload = () => { try { setMutedIds(new Set(JSON.parse(localStorage.getItem('console_muted_conversations') || '[]'))); } catch { return; } }; window.addEventListener('storage', reload); window.addEventListener('console_muted_changed', reload); return () => { window.removeEventListener('storage', reload); window.removeEventListener('console_muted_changed', reload); }; }, []);
+  useEffect(() => {
+    if (listFilter !== 'blocked' || !activeBrand || !config.apiToken) return;
+    let cancelled=false;
+    fetch(`/api/telegram/blocked?site_id=${encodeURIComponent(activeBrand.siteId)}`, {headers:{Authorization:`Bearer ${config.apiToken}`}}).then(r=>r.ok?r.json():null).then(data=>{if(!cancelled&&data) setBlockedChatIds(new Set(data.chat_ids.map(id=>`telegram:site_${activeBrand.siteId}:${id}`)));}).catch(()=>{});
+    return ()=>{cancelled=true;};
+  }, [listFilter, activeBrand, config.apiToken]);
+  const visibleUsers = useMemo(() => channelFilteredUsers.filter(id => {
+    const info = usersInfo[id] || {};
+    if (listFilter === 'unread') return Number(notifications[id] || 0) > 0;
+    if (listFilter === 'open') return ticketsForChat(tickets, id, info).some(ticket => ticket.status !== 'resolved');
+    if (listFilter === 'muted') return mutedIds.has(id);
+    if (listFilter === 'blocked') return blockedChatIds.has(id) || Boolean(info.telegram_blocked);
+    return true;
+  }), [channelFilteredUsers, usersInfo, notifications, tickets, listFilter, mutedIds, blockedChatIds]);
+  const sortedChannelUsers = useMemo(() => [...visibleUsers].sort((a, b) => {
     const at = new Date(usersInfo[a]?.lastMessage?.timestamp || 0).getTime();
     const bt = new Date(usersInfo[b]?.lastMessage?.timestamp || 0).getTime();
     return bt - at || ((onlineUsers[b] ? 1 : 0) - (onlineUsers[a] ? 1 : 0));
-  }), [channelFilteredUsers, onlineUsers, usersInfo]);
+  }), [visibleUsers, onlineUsers, usersInfo]);
 
   const isUserOnline = (userId) => onlineUsers[userId] ?? false;
   const isTabActive = (userId) => tabActiveUsers[userId] ?? false;
@@ -152,22 +171,18 @@ export function Sidebar({
       <div
         key={userId}
         onClick={() => onSelectUser(userId)}
-        className={`p-3 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition relative ${
+        className={`p-3 border-b border-gray-100 dark:border-slate-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-700 transition relative ${
           activeUserId === userId
-            ? 'bg-blue-50 border-l-4 border-l-blue-600'
+            ? 'bg-blue-50 dark:bg-blue-950/50 border-l-4 border-l-blue-600'
             : hasUnread
-            ? 'bg-red-50/40 border-l-4 border-l-red-500 hover:bg-red-50/60'
+            ? 'bg-red-50/40 dark:bg-red-950/20 border-l-4 border-l-red-500 hover:bg-red-50/60'
             : ''
         } ${!online ? 'opacity-70' : ''}`}
       >
         <div className="flex items-center gap-3">
           {/* Avatar */}
           <div className="relative flex-shrink-0">
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${
-              online ? 'bg-blue-600' : 'bg-gray-400'
-            }`}>
-              {info?.telegram_photo_url ? <img src={info.telegram_photo_url} alt="" className="w-10 h-10 rounded-full object-cover" /> : initial}
-            </div>
+            <ConsoleAvatar userId={userId} info={info || {}} initial={initial} apiToken={config.apiToken} size="w-10 h-10" />
             {hasUnread && (
               <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] px-1 bg-red-600 text-white rounded-full border-2 border-white text-[11px] font-black flex items-center justify-center shadow-xs animate-pulse z-10">
                 {unreadCount > 99 ? '99+' : unreadCount}
@@ -182,7 +197,7 @@ export function Sidebar({
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-1">
               <div className={`truncate flex items-center gap-1.5 ${
-                hasUnread ? 'font-black text-gray-950 text-[14px]' : online ? 'font-medium text-gray-800' : 'font-medium text-gray-500'
+                hasUnread ? 'font-bold text-gray-950 dark:text-white text-sm' : 'font-semibold text-gray-800 dark:text-slate-100 text-sm'
               }`}>
                 <span className="truncate">{name}</span>
                 {getBotName(userId) && (
@@ -200,8 +215,8 @@ export function Sidebar({
                   </span>
                 )}
                 {channel === 'telegram' ? (
-                  <span className="text-[10px] bg-sky-50 text-sky-700 px-1.5 py-0.2 rounded border border-sky-200 font-medium">
-                    ✈️ Telegram
+                  <span className="text-[10px] bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-200 px-1.5 py-0.2 rounded border border-sky-200 dark:border-sky-900 font-medium" title="Telegram" aria-label="Telegram">
+                    ✈️
                   </span>
                 ) : channel === 'email' ? (
                   <span className="text-[10px] bg-amber-50 text-amber-700 px-1.5 py-0.2 rounded border border-amber-200 font-medium">
@@ -230,10 +245,10 @@ export function Sidebar({
   };
 
   return (
-    <aside className="w-80 bg-white border-r border-gray-200 flex flex-col h-full">
+    <aside className="w-[min(22rem,90vw)] md:w-80 bg-white dark:bg-[#151f30] border-r border-gray-200 dark:border-slate-700 flex flex-col h-full">
       {/* Header */}
       {searchMode ? (
-        <div className="p-4 border-b border-gray-200 relative">
+        <div className="p-4 border-b border-gray-200 dark:border-slate-700 relative">
           <div className="flex items-center gap-2">
             {/* Search icon on left */}
             <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -268,8 +283,8 @@ export function Sidebar({
           )}
         </div>
       ) : (
-        <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-          <div className="flex items-center gap-2"><h1 className="text-xl font-bold text-gray-800">{activeBrand?.label || 'Telegram Chats'}</h1><span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-600">{sortedChannelUsers.length}</span></div>
+        <div className="p-4 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
+          <div className="flex items-center gap-2"><h1 className="text-xl font-bold text-gray-800 dark:text-slate-100">{activeBrand?.label || 'Telegram Chats'}</h1><span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-600">{sortedChannelUsers.length}</span></div>
           <div className="flex items-center gap-1">
             {/* ONLY keep Search button */}
             <button
@@ -284,6 +299,10 @@ export function Sidebar({
           </div>
         </div>
       )}
+
+      {!searchMode && <div className="px-3 py-2 border-b border-gray-200 dark:border-slate-700 flex gap-1 overflow-x-auto no-scrollbar" role="group" aria-label="Conversation filters">
+        {[['all','All'],['unread','Unread'],['open','Open'],['muted','Muted'],['blocked','Blocked']].map(([id,label]) => <button key={id} onClick={() => setListFilter(id)} aria-pressed={listFilter===id} className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold transition ${listFilter===id ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-slate-700'}`}>{label}</button>)}
+      </div>}
 
       {/* User list / Tickets list / Search results */}
       <div className="flex-1 overflow-y-auto">
@@ -326,22 +345,18 @@ export function Sidebar({
                   <div
                     key={userId}
                     onClick={() => onSelectUser(userId)}
-                    className={`p-3 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition relative ${
+                    className={`p-3 border-b border-gray-100 dark:border-slate-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-700 transition relative ${
                       activeUserId === userId
-                        ? 'bg-blue-50 border-l-4 border-l-blue-600'
+                        ? 'bg-blue-50 dark:bg-blue-950/50 border-l-4 border-l-blue-600'
                         : hasUnread
-                        ? 'bg-red-50/40 border-l-4 border-l-red-500 hover:bg-red-50/60'
+                        ? 'bg-red-50/40 dark:bg-red-950/20 border-l-4 border-l-red-500 hover:bg-red-50/60'
                         : ''
                     } ${!online ? 'opacity-70' : ''}`}
                   >
                     <div className="flex items-center gap-3">
                       {/* Avatar */}
                       <div className="relative flex-shrink-0">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${
-                          online ? 'bg-blue-600' : 'bg-gray-400'
-                        }`}>
-                          {info.telegram_photo_url ? <img src={info.telegram_photo_url} alt="" className="w-10 h-10 rounded-full object-cover" /> : getInitial(userId)}
-                        </div>
+                        <ConsoleAvatar userId={userId} info={info} initial={getInitial(userId)} apiToken={config.apiToken} size="w-10 h-10" />
                         {hasUnread && (
                           <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] px-1 bg-red-600 text-white rounded-full border-2 border-white text-[11px] font-black flex items-center justify-center shadow-xs animate-pulse z-10">
                             {unreadCount > 99 ? '99+' : unreadCount}
@@ -357,7 +372,7 @@ export function Sidebar({
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-1">
                           <div className={`truncate flex items-center gap-1.5 ${
-                            hasUnread ? 'font-black text-gray-950 text-[14px]' : online ? 'font-medium text-gray-800' : 'font-medium text-gray-500'
+                            hasUnread ? 'font-bold text-gray-950 dark:text-white text-sm' : 'font-semibold text-gray-800 dark:text-slate-100 text-sm'
                           }`}>
                             <span className="truncate">{getUserName(userId)}</span>
                             {getBotName(userId) && (
@@ -403,9 +418,6 @@ export function Sidebar({
                                 {unreadCount} new
                               </span>
                             )}
-                            <span className="text-[10px] bg-violet-50 text-violet-800 px-1.5 py-0.5 rounded font-semibold border border-violet-200 max-w-[92px] truncate" title={getConversationBrand(userId, info)}>
-                              {getConversationBrand(userId, info)}
-                            </span>
                             {channel === 'telegram' ? (
                               <span className="text-[10px] bg-sky-50 text-sky-700 px-1.5 py-0.5 rounded font-medium border border-sky-200">
                                 ✈️ Telegram
@@ -426,11 +438,8 @@ export function Sidebar({
                             <span className="text-xs text-gray-500 flex-shrink-0">
                               {getTimeString(usersInfo[userId].lastMessage.timestamp, config.timeFormat, config.timezone)}
                             </span>
-                            <span className={`text-xs truncate ${hasUnread ? 'font-bold text-gray-900' : 'text-gray-400'}`}>
-                              {usersInfo[userId].lastMessage.sender === 'support' && (
-                                <span className="text-gray-500 font-normal">{t('sidebar.you')}: </span>
-                              )}
-                              {usersInfo[userId].lastMessage.text}
+                            <span className={`text-xs truncate ${hasUnread ? 'font-bold text-gray-900 dark:text-white' : 'text-gray-500 dark:text-slate-400'}`}>
+                {usersInfo[userId].lastMessage.sender === 'client' ? 'Customer: ' : usersInfo[userId].lastMessage.sender === 'support' ? 'AI: ' : usersInfo[userId].lastMessage.sender === 'internal_team' ? 'You: ' : ''}{String(usersInfo[userId].lastMessage.text || '').startsWith('/api/telegram/users/') ? '📷 Photo' : usersInfo[userId].lastMessage.text}
                             </span>
                           </div>
                         ) : (
@@ -444,7 +453,7 @@ export function Sidebar({
                           e.stopPropagation();
                           setEditUserId(userId);
                         }}
-                        className="p-1 text-gray-400 hover:text-green-500 hover:bg-green-50 rounded transition"
+                        className="p-1 text-gray-400 hover:text-green-500 hover:bg-green-50 rounded transition opacity-60 hover:opacity-100 focus:opacity-100"
                         title={t('sidebar.editUser')}
                       >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -458,7 +467,7 @@ export function Sidebar({
                           e.stopPropagation();
                           setDeleteConfirm(userId);
                         }}
-                        className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition"
+                        className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition opacity-60 hover:opacity-100 focus:opacity-100"
                         title={t('sidebar.deleteChat')}
                       >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

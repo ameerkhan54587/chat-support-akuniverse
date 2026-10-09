@@ -10,6 +10,7 @@ const nodemailer = require('nodemailer');
 const { pollTelegramBots } = require('./telegram-polling');
 const { normalizeExternalChatEvent, verifyExternalChatSignature } = require('./external-chat-ingest');
 const { notifySiteHandoff, sendSiteReply } = require('./handoff-client');
+const { telegramProfilePhotoUrl } = require('./telegram-profile');
 
 // Anonymous name generator (deprecated - widget now asks for name via form)
 // const ANON_ADJECTIVES = [
@@ -591,9 +592,7 @@ function stopTelegramBot() {
 
 async function processTelegramUpdate(update, bot) {
     const message = update && update.message;
-    if (!message || !message.chat || !message.text) {
-        return;
-    }
+    if (!message || !message.chat || (!message.text && !message.caption && !message.photo && !message.document)) return;
     if (message.from && message.from.is_bot) {
         return;
     }
@@ -602,10 +601,12 @@ async function processTelegramUpdate(update, bot) {
         if (blocked) return;
     }
 
-    const text = String(message.text || '').trim();
-    if (!text) {
-        return;
-    }
+    const text = String(message.text || message.caption || '').trim();
+    const photo = Array.isArray(message.photo) && message.photo.length ? message.photo[message.photo.length - 1] : null;
+    const mediaFileId = photo?.file_id || (message.document?.mime_type?.startsWith('image/') ? message.document.file_id : '');
+    const mediaUrl = mediaFileId ? `/api/telegram/users/${encodeURIComponent(bot.siteId)}/${encodeURIComponent(message.chat.id)}/media/${encodeURIComponent(mediaFileId)}` : '';
+    if (!text && !mediaUrl) return;
+    const storedText = [text, mediaUrl].filter(Boolean).join(text ? '\n' : '');
 
     const timestamp = new Date((message.date || Math.floor(Date.now() / 1000)) * 1000).toISOString();
 
@@ -620,15 +621,15 @@ async function processTelegramUpdate(update, bot) {
             channel: 'telegram',
             telegram_bot_id: bot.id,
             telegram_bot_name: bot.name || bot.username || 'Telegram bot',
-            telegram_photo_url: message.from?.photo_url || message.chat.photo_url || '',
+            telegram_photo_url: telegramProfilePhotoUrl(bot, message.from?.id || message.chat.id),
             user_session: targetId,
             site_id: bot.siteId || (bot.id && bot.id.startsWith('site_') ? bot.id.replace('site_', '') : ''),
         };
 
         updateSessionInfo(targetId, metadata);
 
-        saveMessage(targetId, 'client', text, timestamp, (newId) => {
-            broadcastToAdmins({ type: 'client_msg', from: targetId, text, info: metadata, timestamp, id: newId });
+        saveMessage(targetId, 'client', storedText, timestamp, (newId) => {
+            broadcastToAdmins({ type: 'client_msg', from: targetId, text: storedText, info: metadata, timestamp, id: newId });
 
         });
         return;
@@ -788,6 +789,7 @@ function getAllSessions(callback) {
 
 function runAdminReply(targetId, rawText, ws) {
     const text = typeof rawText === 'string' ? rawText.trim() : '';
+    let persistedText = text;
     const sendResult = async () => {
         if (!targetId.startsWith('telegram:')) return { success: true };
         const match = /^telegram:site_([a-z0-9_-]{1,64}):(-?\d{1,32})$/i.exec(targetId);
@@ -797,12 +799,16 @@ function runAdminReply(targetId, rawText, ws) {
         const metadata = clientInfo.get(targetId) || {};
         const bot = getTelegramBot(metadata.telegram_bot_id || `site_${siteId}`);
         if (siteId === 'smsotps') {
+            if (text.startsWith('data:image/') || /^https:\/\//i.test(text)) throw new Error('Image replies are not supported by the SMSOTPS signed reply endpoint.');
             const site = configLoader.getSiteById(siteId);
             const result = await sendSiteReply({ siteId, secret: site?.handoff_secret, apiKey: site?.api_key, chatId, text });
             if (!result.success) throw new Error(result.error === 'site_rejected' ? `SMSOTPS rejected reply (${result.status}).` : 'SMSOTPS reply endpoint is not configured or unavailable.');
             return result;
         }
-        await callTelegramApi('sendMessage', { chat_id: chatId, text }, bot);
+        if (text.startsWith('data:image/')) throw new Error('Upload images through the authenticated image endpoint.');
+        else {
+            await callTelegramApi('sendMessage', { chat_id: chatId, text }, bot);
+        }
         if (bot?.siteId && bot.handoff_secret) {
             const result = await notifySiteHandoff({ siteId: bot.siteId, secret: bot.handoff_secret, apiKey: bot.api_key, chatId });
             if (result.error) console.warn(`[Handoff] Site ${bot.siteId}: ${result.error}${result.status ? ` (${result.status})` : ''}`);
@@ -811,9 +817,9 @@ function runAdminReply(targetId, rawText, ws) {
     };
     sendResult().then(() => {
         const timestamp = new Date().toISOString();
-        saveMessage(targetId, 'internal_team', text, timestamp, (newId) => {
-            sendToUserTabs(targetId, { text, sender: 'internal_team', timestamp, id: newId });
-            broadcastToAdmins({ type: 'admin_msg_sent', targetId, text, sender: 'internal_team', timestamp, id: newId });
+        saveMessage(targetId, 'internal_team', persistedText, timestamp, (newId) => {
+            sendToUserTabs(targetId, { text: persistedText, sender: 'internal_team', timestamp, id: newId });
+            broadcastToAdmins({ type: 'admin_msg_sent', targetId, text: persistedText, sender: 'internal_team', timestamp, id: newId });
         });
     }).catch((error) => {
         console.warn(`[Admin reply] ${String(error?.message || 'unknown').slice(0, 160)}`);
@@ -1344,6 +1350,92 @@ app.put('/api/sites/:id', requireAdminAuth, (req, res) => {
 
 app.delete('/api/sites/:id', requireAdminAuth, (req, res) => {
     return res.status(403).json({ error: 'configuration_is_environment_only' });
+});
+
+// Authenticated Telegram media proxies. Telegram Update objects do not contain stable profile-photo URLs.
+app.get(['/api/telegram/users/:siteId/:chatId/photo', '/api/telegram/users/:siteId/:chatId/media/:fileId'], requireAdminAuth, async (req, res) => {
+    try {
+        const bot = getTelegramBot(`site_${String(req.params.siteId).toLowerCase()}`);
+        if (!bot?.botToken) return res.status(404).end();
+        let fileId = req.params.fileId || '';
+        if (!fileId && req.path.endsWith('/photo')) {
+            const targetId = `telegram:site_${String(req.params.siteId).toLowerCase()}:${req.params.chatId}`;
+            let sessionInfo = clientInfo.get(targetId) || {};
+            if (!sessionInfo.user_id) {
+                const row = await db.getAsync('SELECT metadata FROM sessions WHERE session_id = ?', [targetId]).catch(() => null);
+                try { sessionInfo = JSON.parse(row?.metadata || '{}'); } catch { sessionInfo = {}; }
+            }
+            const result = await callTelegramApi('getUserProfilePhotos', { user_id: String(sessionInfo.user_id || req.params.chatId), limit: 1 }, bot);
+            fileId = result?.photos?.[0]?.at(-1)?.file_id || '';
+        }
+        if (!fileId) return res.status(404).end();
+        const file = await callTelegramApi('getFile', { file_id: fileId }, bot);
+        if (!file?.file_path) return res.status(404).end();
+        const upstream = await fetch(`https://api.telegram.org/file/bot${bot.botToken}/${file.file_path}`, { signal: AbortSignal.timeout(8000) });
+        if (!upstream.ok) return res.status(502).end();
+        const declaredSize = Number(upstream.headers.get('content-length') || 0);
+        if (declaredSize > 20 * 1024 * 1024) return res.status(413).end();
+        const chunks = []; let size = 0;
+        for await (const chunk of upstream.body) { size += chunk.length; if (size > 20 * 1024 * 1024) { upstream.body.cancel().catch(() => {}); return res.status(413).end(); } chunks.push(chunk); }
+        const bytes = Buffer.concat(chunks, size);
+        res.set('Cache-Control', 'private, max-age=3600');
+        res.set('Content-Type', upstream.headers.get('content-type') || 'image/jpeg');
+        res.set('Content-Length', String(bytes.length));
+        res.send(bytes);
+    } catch { res.status(502).end(); }
+});
+
+// Send an image to Telegram via authenticated HTTP; WebSocket payloads are intentionally small.
+app.post('/api/telegram/users/:siteId/:chatId/send-photo', requireAdminAuth, express.raw({ type: /^image\//, limit: '8mb' }), async (req, res) => {
+    const siteId = String(req.params.siteId || '').toLowerCase();
+    const chatId = String(req.params.chatId || '');
+    if (siteId === 'smsotps') return res.status(501).json({ error: 'image_replies_not_supported_by_site_backend' });
+    if (!/^[a-z0-9_-]{1,64}$/.test(siteId) || !/^-?\d{1,32}$/.test(chatId)) return res.status(400).json({ error: 'invalid_chat' });
+    if (!['fbverse_bot'].includes(siteId)) return res.status(403).json({ error: 'image_send_not_supported_for_site' });
+    if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'empty_image' });
+    try {
+        const targetId = `telegram:site_${siteId}:${chatId}`;
+        let metadata = clientInfo.get(targetId) || {};
+        if (!metadata.telegram_bot_id) {
+            const row = await db.getAsync('SELECT metadata FROM sessions WHERE session_id = ?', [targetId]).catch(() => null);
+            try { metadata = JSON.parse(row?.metadata || '{}'); } catch { metadata = {}; }
+        }
+        const bot = telegramBots.find(candidate => candidate.siteId === siteId || candidate.id === `site_${siteId}`) || null;
+        if (!bot?.botToken) return res.status(503).json({ error: 'telegram_bot_unavailable' });
+        const contentType = String(req.headers['content-type'] || '').split(';')[0];
+        if (!/^image\/(jpeg|png|gif|webp)$/.test(contentType)) return res.status(415).json({ error: 'unsupported_image_type' });
+        const form = new FormData();
+        form.append('chat_id', chatId);
+        form.append('photo', new Blob([req.body], { type: contentType }), 'image');
+        const response = await fetch(`https://api.telegram.org/bot${bot.botToken}/sendPhoto`, { method: 'POST', body: form, signal: AbortSignal.timeout(20000) });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.ok) return res.status(502).json({ error: 'telegram_send_failed', description: String(data.description || '').slice(0, 160) });
+        const fileId = data.result?.photo?.at(-1)?.file_id;
+        if (!fileId) return res.status(502).json({ error: 'telegram_image_id_missing' });
+        const persistedText = `/api/telegram/users/${encodeURIComponent(siteId)}/${encodeURIComponent(chatId)}/media/${encodeURIComponent(fileId)}`;
+        if (bot?.siteId && bot.handoff_secret) {
+            const handoff = await notifySiteHandoff({ siteId: bot.siteId, secret: bot.handoff_secret, apiKey: bot.api_key, chatId });
+            if (handoff.error) console.warn(`[Handoff] Site ${bot.siteId}: ${handoff.error}${handoff.status ? ` (${handoff.status})` : ''}`);
+        }
+        const timestamp = new Date().toISOString();
+        saveMessage(targetId, 'internal_team', persistedText, timestamp, (newId) => {
+            sendToUserTabs(targetId, { text: persistedText, sender: 'internal_team', timestamp, id: newId });
+            broadcastToAdmins({ type: 'admin_msg_sent', targetId, text: persistedText, sender: 'internal_team', timestamp, id: newId });
+            res.status(201).json({ success: true });
+        });
+    } catch (error) {
+        console.warn(`[Admin image reply] ${String(error?.message || 'unknown').slice(0, 120)}`);
+        return res.status(502).json({ error: 'telegram_send_failed' });
+    }
+});
+
+app.get('/api/telegram/blocked', requireAdminAuth, async (req, res) => {
+    const siteId = String(req.query.site_id || '').toLowerCase();
+    if (!/^[a-z0-9_-]{1,64}$/.test(siteId)) return res.status(400).json({ error: 'invalid_site_id' });
+    try {
+        const rows = await db.allAsync('SELECT chat_id FROM blocked_telegram_users WHERE site_id = ?', [siteId]);
+        res.json({ chat_ids: rows.map(row => String(row.chat_id)) });
+    } catch { res.status(500).json({ error: 'db_error' }); }
 });
 
 // Tickets Management

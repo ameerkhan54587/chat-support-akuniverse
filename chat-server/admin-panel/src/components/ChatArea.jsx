@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { ConfirmModal } from './ConfirmModal';
 import { useChat } from '../context/ChatContext';
 import { useTranslation } from '../i18n';
 import { Message } from './Message';
@@ -10,6 +11,11 @@ export function ChatArea({ onSendMessage, onDeleteMessage, onLoadMore, onDeleteS
   const { t } = useTranslation();
   const { activeUserId, messages, usersInfo, typingText, config, hasMoreMessages, loadingMoreMessages } = state;
   const [inputText, setInputText] = useState('');
+  const [selectedImage, setSelectedImage] = useState(null);
+  const [imagePreview, setImagePreview] = useState('');
+  const [sending, setSending] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const fileInputRef = useRef(null);
   const [expandedTicketId, setExpandedTicketId] = useState(null);
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
@@ -105,21 +111,17 @@ export function ChatArea({ onSendMessage, onDeleteMessage, onLoadMore, onDeleteS
     isPrependingRef.current = false;
   }, [messages]);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!inputText.trim() || !activeUserId) return;
-
-    onSendMessage(activeUserId, inputText.trim());
-    setInputText('');
-    setAdminTyping(false);
+    if (sending || (!inputText.trim() && !selectedImage) || !activeUserId) return;
+    if (selectedImage && !/^telegram:/i.test(String(activeUserId))) { window.alert('Image attachments are only supported in Telegram chats.'); return; }
+    setSending(true);
+    try {
+      const success = await onSendMessage(activeUserId, selectedImage || inputText.trim());
+      if (success !== false) { setInputText(''); setSelectedImage(null); setImagePreview(''); setAdminTyping(false); }
+    } finally { setSending(false); }
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit(e);
-    }
-  };
 
   // Group messages by date
   const renderMessages = () => {
@@ -194,21 +196,22 @@ export function ChatArea({ onSendMessage, onDeleteMessage, onLoadMore, onDeleteS
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-gray-50 h-full">
+    <div className="flex-1 flex flex-col bg-gray-50 dark:bg-[#0b1120] h-full min-w-0">
       {/* Chat header */}
-      <div className="bg-white border-b border-gray-200 px-4 py-3">
+      <div className="bg-white dark:bg-[#151f30] border-b border-gray-200 dark:border-slate-700 px-4 py-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 flex-wrap">
             {/* Mobile burger menu */}
             <button
               onClick={onOpenSidebar}
+              aria-label="Open conversations" title="Open conversations"
               className="p-1.5 text-gray-500 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition md:hidden"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
-            <div className="font-medium text-gray-800">
+            <div className="font-semibold text-gray-900 dark:text-slate-100">
               {userName}{userEmail && `: ${userEmail}`}
             </div>
 
@@ -226,31 +229,20 @@ export function ChatArea({ onSendMessage, onDeleteMessage, onLoadMore, onDeleteS
 
           </div>
           {userInfo?.source === 'telegram' && <div className="flex gap-2">
-            <button type="button" onClick={onToggleTelegramBlock} className="text-xs rounded border px-2 py-1">{telegramBlocked ? 'Unblock' : 'Block'}</button>
-            <button type="button" onClick={onToggleTelegramMute} className="text-xs rounded border px-2 py-1">{telegramMuted ? 'Unmute' : 'Mute'}</button>
+            <button type="button" onClick={onToggleTelegramBlock} className="text-xs rounded-lg border border-gray-300 dark:border-slate-600 px-2.5 py-1 text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition">{telegramBlocked ? 'Unblock' : 'Block'}</button>
+            <button type="button" onClick={onToggleTelegramMute} className="text-xs rounded-lg border border-gray-300 dark:border-slate-600 px-2.5 py-1 text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition">{telegramMuted ? 'Unmute' : 'Mute'}</button>
           </div>}
           <button
-            onClick={onDeleteSystemMessages}
+            onClick={() => setConfirmClear(true)}
             className="text-xs text-gray-400 hover:text-red-500 transition"
             title={t('chat.clearLogTitle')}
+            aria-label={t('chat.clearLogTitle')}
           >
             🗑 {t('chat.clearLog')}
           </button>
         </div>
+        <details className="mt-2 text-xs text-gray-500"><summary className="cursor-pointer select-none">Technical details</summary><div className="mt-1 flex flex-wrap items-center gap-x-2"><span>session: {userInfo?.user_session || '—'}</span><span>user: {userInfo?.user_id || '—'}</span><button type="button" className="text-blue-500 hover:underline" onClick={() => navigator.clipboard.writeText(activeUserId)} title="Copy conversation ID">Copy ID</button></div></details>
         <div className="text-xs text-gray-500 mt-1 flex flex-wrap items-center gap-x-1">
-          {userInfo?.user_session && (
-            <span>user_session: {userInfo.user_session},</span>
-          )}
-          {userInfo?.user_id && (
-            <span>user_id: {userInfo.user_id},</span>
-          )}
-          <span
-            className="cursor-pointer hover:text-blue-500"
-            onClick={() => navigator.clipboard.writeText(activeUserId)}
-            title={t('chat.copyId')}
-          >
-            target_id: {activeUserId}
-          </span>
           {userInfo?.current_url && (
             <>
               <span className="text-gray-400">📍</span>
@@ -269,7 +261,7 @@ export function ChatArea({ onSendMessage, onDeleteMessage, onLoadMore, onDeleteS
       </div>
 
       {tickets.length > 0 && (
-        <section className="border-b border-amber-200 bg-amber-50/70 px-4 py-3 space-y-2" aria-label="Support tickets for this chat">
+        <section className="border-b border-amber-200 dark:border-amber-900 bg-amber-50/70 dark:bg-amber-950/30 px-4 py-3 space-y-2" aria-label="Support tickets for this chat">
           {tickets.map(ticket => {
             const expanded = expandedTicketId === ticket.id;
             const isResolved = ticket.status === 'resolved';
@@ -346,19 +338,22 @@ export function ChatArea({ onSendMessage, onDeleteMessage, onLoadMore, onDeleteS
       )}
 
       {/* Input area */}
-      <form onSubmit={handleSubmit} className="bg-white border-t border-gray-200 p-4">
-        <div className="flex gap-2">
-          <input
-            type="text"
+      <form onSubmit={handleSubmit} className="bg-white dark:bg-[#151f30] border-t border-gray-200 dark:border-slate-700 p-3 sm:p-4">
+        {imagePreview && <div className="mb-2 flex items-center gap-3"><img src={imagePreview} alt="Selected attachment preview" className="h-16 w-16 rounded-lg object-cover" /><button type="button" className="text-xs text-red-500" onClick={() => { setSelectedImage(null); setImagePreview(''); }}>Remove image</button></div>}
+        <div className="flex gap-2 items-end">
+          <input ref={fileInputRef} type="file" accept="image/*" className="hidden" aria-label="Choose image" onChange={e => { const file=e.target.files?.[0]; if (!file) return; if (/^telegram:site_smsotps:/i.test(String(activeUserId))) { window.alert('SMSOTPS does not currently support image replies.'); e.target.value=''; return; } if (file.size > 7.5*1024*1024) { window.alert('Image must be under 7.5 MB.'); e.target.value=''; return; } const reader=new FileReader(); reader.onload=()=>{ setSelectedImage(String(reader.result)); setImagePreview(String(reader.result)); e.target.value=''; }; reader.readAsDataURL(file); }} />
+          <button type="button" title="Attach image" aria-label="Attach image" onClick={() => fileInputRef.current?.click()} className="h-10 w-10 shrink-0 rounded-full border border-gray-300 dark:border-slate-600 text-gray-500 hover:text-blue-500">＋</button>
+          <textarea
+            rows={1}
             value={inputText}
             onChange={(e) => { setInputText(e.target.value); setAdminTyping(e.target.value.length > 0); }}
-            onKeyDown={handleKeyDown}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(e); } }}
             placeholder={t('chat.inputPlaceholder')}
-            className="flex-1 px-4 py-2 border border-gray-300 rounded-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+            className="flex-1 min-h-10 max-h-32 resize-y px-4 py-2 border border-gray-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
           />
           <button
             type="submit"
-            disabled={!inputText.trim()}
+            disabled={sending || (!inputText.trim() && !selectedImage)}
             className="w-10 h-10 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white rounded-full flex items-center justify-center transition"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -367,6 +362,7 @@ export function ChatArea({ onSendMessage, onDeleteMessage, onLoadMore, onDeleteS
           </button>
         </div>
       </form>
+      <ConfirmModal isOpen={confirmClear} onClose={() => setConfirmClear(false)} onConfirm={onDeleteSystemMessages} title="Clear system log?" message="This removes system events from this conversation. Customer and agent messages stay." confirmText="Clear log" danger />
     </div>
   );
 }

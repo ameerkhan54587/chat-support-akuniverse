@@ -36,7 +36,7 @@ export function UpperTabBar({
   const totalUnread = tabs.reduce((sum, tab) => sum + tab.unread, 0);
 
   return (
-    <header className="bg-white border-b border-gray-200 px-3 sm:px-4 py-2 flex items-center justify-between gap-2 shadow-xs select-none z-20 flex-shrink-0">
+    <header className="bg-white dark:bg-[#151f30] border-b border-gray-200 dark:border-slate-700 px-3 sm:px-4 py-2 flex items-center justify-between gap-2 shadow-xs select-none z-20 flex-shrink-0">
       {/* Brand & Channel Tabs */}
       <div className="flex items-center gap-3 min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-shrink-0 pr-2 border-r border-gray-200">
@@ -74,10 +74,10 @@ export function UpperTabBar({
                 className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all duration-150 flex-shrink-0 ${
                   isActive
                     ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20 ring-1 ring-blue-600'
-                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100/80 bg-gray-50/70 border border-gray-200/70'
+                    : 'text-gray-600 dark:text-slate-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100/80 dark:hover:bg-slate-700 bg-gray-50/70 dark:bg-slate-800 border border-gray-200/70 dark:border-slate-700'
                 }`}
               >
-                <span className="text-sm">{tab.icon}</span>
+                <span className="text-sm" aria-hidden="true">{tab.icon}</span>
                 <span>{tab.label}</span>
 
                 {/* Total Count Pill */}
@@ -86,7 +86,7 @@ export function UpperTabBar({
                     className={`ml-0.5 text-[10px] font-bold px-1.5 py-0.2 rounded-full transition ${
                       isActive
                         ? 'bg-white/25 text-white'
-                        : 'bg-gray-200 text-gray-700'
+                        : 'bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-slate-200'
                     }`}
                     title={`${tab.total} total`}
                   >
@@ -165,7 +165,7 @@ export function UpperTabBar({
           className={`p-1.5 rounded-lg border transition ${
             soundEnabled
               ? 'text-blue-600 bg-blue-50 border-blue-200'
-              : 'text-gray-400 bg-gray-50 border-gray-200'
+              : 'text-gray-400 bg-gray-50 dark:bg-slate-800 border-gray-200 dark:border-slate-700'
           }`}
           title={soundEnabled ? 'Mute Sounds' : 'Unmute Sounds'}
         >

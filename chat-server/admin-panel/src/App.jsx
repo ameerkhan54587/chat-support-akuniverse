@@ -68,7 +68,7 @@ function AppContent() {
     if (!state.activeUserId) return;
     const next = new Set(telegramMuted);
     if (next.has(state.activeUserId)) next.delete(state.activeUserId); else next.add(state.activeUserId);
-    setTelegramMuted(next); localStorage.setItem('console_muted_conversations', JSON.stringify([...next]));
+    setTelegramMuted(next); localStorage.setItem('console_muted_conversations', JSON.stringify([...next])); window.dispatchEvent(new Event('console_muted_changed'));
   };
 
   // Fetch full tickets list
@@ -318,10 +318,29 @@ function AppContent() {
   };
 
   const replyIdRef = useRef(0);
-  const handleSendMessage = (targetId, text) => {
+  const handleSendMessage = async (targetId, text) => {
+    if (typeof text === 'string' && text.startsWith('data:image/')) {
+      const match = /^data:(image\/(?:jpeg|png|gif|webp));base64,([\s\S]+)$/.exec(text);
+      if (!match) { showToast('Unsupported image format.', 'error'); return false; }
+      try {
+        const binary = atob(match[2]);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        const info = state.usersInfo[targetId] || {};
+        const siteId = info.site_id;
+        const chatId = info.user_id;
+        if (!siteId || !chatId || /^smsotps$/i.test(siteId)) { showToast('Image replies are not supported for this conversation.', 'error'); return false; }
+        const response = await fetch(`/api/telegram/users/${encodeURIComponent(siteId)}/${encodeURIComponent(chatId)}/send-photo`, { method: 'POST', headers: { Authorization: `Bearer ${state.config.apiToken}`, 'Content-Type': match[1] }, body: bytes });
+        if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error === 'telegram_bot_unavailable' ? 'Telegram bot unavailable.' : data.error === 'unsupported_image_type' ? 'Use a JPEG, PNG, GIF, or WebP image.' : `Image send failed (${response.status}).`); }
+        showToast('Image sent.', 'success');
+        return true;
+      } catch (error) { showToast(error.message || 'Image send failed. Please retry.', 'error'); return false; }
+
+    }
     replyIdRef.current += 1;
     const clientMessageId = `${targetId}:${Date.now()}:${replyIdRef.current}`;
     sendReply(targetId, text, clientMessageId);
+    return true;
   };
 
   const handleDeleteMessage = (msgId, targetId) => {
@@ -398,7 +417,7 @@ function AppContent() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gray-100 overflow-hidden">
+    <div className="flex flex-col h-screen bg-gray-100 dark:bg-[#0b1120] overflow-hidden">
       {/* Upper Navigation Tabs Bar */}
       <UpperTabBar
         activeTab={activeChannelTab}
@@ -452,7 +471,7 @@ function AppContent() {
         </div>
 
         {/* Live chat and its related support tickets */}
-        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-white">
+        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-white dark:bg-[#151f30]">
           <ChatArea
             onSendMessage={handleSendMessage}
             onDeleteMessage={handleDeleteMessage}
@@ -471,6 +490,8 @@ function AppContent() {
           />
         </div>
       </div>
+
+      <footer title="Release v0.11.0" className="shrink-0 px-3 py-1 text-[10px] text-slate-500 text-right bg-white dark:bg-[#0b1120] border-t border-gray-200 dark:border-slate-700">AKUniverse Console · v0.11.0</footer>
 
       {/* Modals */}
       <ConfirmModal
