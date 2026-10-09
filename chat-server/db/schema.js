@@ -52,6 +52,14 @@ async function initDatabase(db) {
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
 
+    await db.runAsync(`CREATE TABLE IF NOT EXISTS message_media (
+        message_id INTEGER PRIMARY KEY,
+        mime_type TEXT NOT NULL,
+        data BLOB NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+    )`);
+
     await db.runAsync(`CREATE TABLE IF NOT EXISTS sessions (
         session_id TEXT PRIMARY KEY,
         metadata TEXT,

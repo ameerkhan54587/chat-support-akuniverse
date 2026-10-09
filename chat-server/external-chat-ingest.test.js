@@ -81,3 +81,21 @@ test('falls back from Telegram profile name to username and strips leading at si
     assert.equal(result.value.metadata.user_name, 'ameer_khan07');
     assert.equal(result.value.username, 'ameer_khan07');
 });
+
+
+test('normalizes a bounded inbound image with caption into a small photo row text', () => {
+    const image = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+    const result = normalizeExternalChatEvent({ ...event, text: '', caption: 'Receipt', media_mime: 'image/jpeg', media_base64: image.toString('base64') });
+    assert.equal(result.error, undefined);
+    assert.equal(result.value.text, '[photo] Receipt');
+    assert.deepEqual(result.value.mediaBytes, image);
+    assert.equal(result.value.mediaMime, 'image/jpeg');
+    const unicodeCaption = normalizeExternalChatEvent({ ...event, text: '', caption: 'رسید ✓', media_mime: 'image/jpeg', media_base64: image.toString('base64') });
+    assert.equal(unicodeCaption.value.text, '[photo] رسید ✓');
+});
+
+test('rejects invalid or oversized inbound media', () => {
+    assert.equal(normalizeExternalChatEvent({ ...event, text: '', media_mime: 'image/svg+xml', media_base64: Buffer.from('x').toString('base64') }).error, 'invalid_media');
+    assert.equal(normalizeExternalChatEvent({ ...event, text: '', media_mime: 'image/jpeg', media_base64: '!!!' }).error, 'invalid_media');
+    assert.equal(normalizeExternalChatEvent({ ...event, text: '', media_mime: 'image/jpeg', media_base64: Buffer.alloc(5 * 1024 * 1024 + 1).toString('base64') }).error, 'invalid_media');
+});

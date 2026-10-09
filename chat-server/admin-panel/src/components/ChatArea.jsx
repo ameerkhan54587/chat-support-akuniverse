@@ -117,7 +117,7 @@ export function ChatArea({ onSendMessage, onDeleteMessage, onLoadMore, onDeleteS
     if (selectedImage && !/^telegram:/i.test(String(activeUserId))) { window.alert('Image attachments are only supported in Telegram chats.'); return; }
     setSending(true);
     try {
-      const success = await onSendMessage(activeUserId, selectedImage || inputText.trim());
+      const success = await onSendMessage(activeUserId, selectedImage ? { imageData: selectedImage, caption: inputText.trim() } : inputText.trim());
       if (success !== false) { setInputText(''); setSelectedImage(null); setImagePreview(''); setAdminTyping(false); }
     } finally { setSending(false); }
   };
@@ -341,7 +341,7 @@ export function ChatArea({ onSendMessage, onDeleteMessage, onLoadMore, onDeleteS
       <form onSubmit={handleSubmit} className="bg-white dark:bg-[#151f30] border-t border-gray-200 dark:border-slate-700 p-3 sm:p-4">
         {imagePreview && <div className="mb-2 flex items-center gap-3"><img src={imagePreview} alt="Selected attachment preview" className="h-16 w-16 rounded-lg object-cover" /><button type="button" className="text-xs text-red-500" onClick={() => { setSelectedImage(null); setImagePreview(''); }}>Remove image</button></div>}
         <div className="flex gap-2 items-end">
-          <input ref={fileInputRef} type="file" accept="image/*" className="hidden" aria-label="Choose image" onChange={e => { const file=e.target.files?.[0]; if (!file) return; if (/^telegram:site_smsotps:/i.test(String(activeUserId))) { window.alert('SMSOTPS does not currently support image replies.'); e.target.value=''; return; } if (file.size > 7.5*1024*1024) { window.alert('Image must be under 7.5 MB.'); e.target.value=''; return; } const reader=new FileReader(); reader.onload=()=>{ setSelectedImage(String(reader.result)); setImagePreview(String(reader.result)); e.target.value=''; }; reader.readAsDataURL(file); }} />
+          <input ref={fileInputRef} type="file" accept="image/*" className="hidden" aria-label="Choose image" onChange={e => { const file=e.target.files?.[0]; if (!file) return; if (file.size > (/^telegram:site_smsotps:/i.test(String(activeUserId)) ? 5 : 7.5)*1024*1024) { window.alert(/^telegram:site_smsotps:/i.test(String(activeUserId)) ? 'SMSOTPS images must be 5 MB or smaller.' : 'Image must be under 7.5 MB.'); e.target.value=''; return; } const reader=new FileReader(); reader.onload=()=>{ setSelectedImage(String(reader.result)); setImagePreview(String(reader.result)); e.target.value=''; }; reader.readAsDataURL(file); }} />
           <button type="button" title="Attach image" aria-label="Attach image" onClick={() => fileInputRef.current?.click()} className="h-10 w-10 shrink-0 rounded-full border border-gray-300 dark:border-slate-600 text-gray-500 hover:text-blue-500">＋</button>
           <textarea
             rows={1}

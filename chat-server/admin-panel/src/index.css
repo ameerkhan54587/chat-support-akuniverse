@@ -48,7 +48,7 @@ html, body, #root {
 .dark .border-gray-100, .dark .border-gray-200 { border-color:#374151 !important; }
 .dark .hover\:bg-gray-50:hover { background-color:#374151 !important; }
 
-/* Release 0.11.0 - compact, readable dark support workspace */
+/* Release 0.12.0 - compact, readable dark support workspace */
 :root { color-scheme: light; --app-bg:#0b1120; --panel:#151f30; --surface:#1e293b; --line:#334155; --accent:#2878ff; --primary:#f1f5f9; --secondary:#94a3b8; }
 html.dark { color-scheme:dark; background:var(--app-bg); }
 html.dark body { background:var(--app-bg); color:var(--primary); }

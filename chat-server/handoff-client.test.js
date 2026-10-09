@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
-const { HANDOFF_ENDPOINTS, REPLY_ENDPOINTS, createHandoffRequest, notifySiteHandoff, createSiteReplyRequest, sendSiteReply, signSiteHandoffRequest, verifySiteHandoffSignature } = require('./handoff-client');
+const { HANDOFF_ENDPOINTS, REPLY_ENDPOINTS, createHandoffRequest, notifySiteHandoff, createSiteReplyRequest, sendSiteReply, createSitePhotoReplyRequest, sendSitePhotoReply, signSiteHandoffRequest, verifySiteHandoffSignature } = require('./handoff-client');
 
 test('signs SMSOTPS handoff to its fixed URL with exact raw JSON', () => {
     const result = createHandoffRequest({ siteId: 'smsotps', secret: 'test-secret', chatId: '-100123', nowSeconds: 1791482400 });
@@ -61,4 +61,29 @@ test('sends signed site reply and only reports success from the site', async () 
     assert.equal(sent.url, REPLY_ENDPOINTS.smsotps);
     assert.equal(sent.options.method, 'POST');
     assert.equal(sent.options.body, JSON.stringify({ chat_id: '1', text: 'hi' }));
+});
+
+
+test('signs exact multipart SMSOTPS photo bytes and posts them to the photo endpoint', async () => {
+    const imageBytes = Buffer.from([0xff, 0xd8, 0x00, 0xfe]);
+    const request = createSitePhotoReplyRequest({ siteId: 'smsotps', secret: 'photo-secret', chatId: '8975496349', imageBytes, mimeType: 'image/jpeg', caption: 'check this', nowSeconds: 1791482400, boundary: 'unit_test_boundary' });
+    assert.equal(request.endpoint, REPLY_ENDPOINTS.smsotpsPhoto);
+    assert.equal(request.headers['Content-Type'], 'multipart/form-data; boundary=unit_test_boundary');
+    assert.ok(request.body.includes(Buffer.from('name=\"chat_id\"')));
+    assert.equal(request.headers.Authorization, undefined);
+    assert.equal(request.headers['X-Handoff-Signature'], signSiteHandoffRequest(request.body, '1791482400', 'photo-secret'));
+    assert.ok(request.body.includes(imageBytes));
+    assert.ok(request.body.includes(Buffer.from('name=\"caption\"')));
+    let sent;
+    const result = await sendSitePhotoReply({ siteId: 'smsotps', secret: 'photo-secret', chatId: '8975496349', imageBytes, mimeType: 'image/jpeg', caption: 'check this', nowSeconds: 1791482400, boundary: 'unit_test_boundary' }, async (url, options) => { sent = { url, options }; return { ok: true, status: 201 }; });
+    assert.deepEqual(result, { success: true, status: 201 });
+    assert.equal(sent.url, REPLY_ENDPOINTS.smsotpsPhoto);
+    assert.equal(sent.options.headers['X-Handoff-Signature'], signSiteHandoffRequest(sent.options.body, '1791482400', 'photo-secret'));
+});
+
+test('rejects malformed SMSOTPS photo request fields', () => {
+    const bytes = Buffer.from('img');
+    assert.equal(createSitePhotoReplyRequest({ siteId: 'smsotps', secret: 's', chatId: 'bad', imageBytes: bytes, mimeType: 'image/jpeg' }).error, 'invalid_chat_id');
+    assert.equal(createSitePhotoReplyRequest({ siteId: 'smsotps', secret: 's', chatId: '1', imageBytes: bytes, mimeType: 'image/svg+xml' }).error, 'unsupported_image_type');
+    assert.equal(createSitePhotoReplyRequest({ siteId: 'smsotps', secret: 's', chatId: '1', imageBytes: Buffer.alloc(5 * 1024 * 1024 + 1), mimeType: 'image/jpeg' }).error, 'invalid_image');
 });

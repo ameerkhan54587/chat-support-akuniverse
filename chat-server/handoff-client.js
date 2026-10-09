@@ -10,6 +10,7 @@ const HANDOFF_ENDPOINTS = Object.freeze({
 
 const REPLY_ENDPOINTS = Object.freeze({
     smsotps: 'https://api.smsotps.com/api/support/reply',
+    smsotpsPhoto: 'https://api.smsotps.com/api/support/reply-photo',
 });
 
 function createHandoffRequest({ siteId, secret, apiKey, chatId, nowSeconds = Math.floor(Date.now() / 1000) }) {
@@ -59,6 +60,44 @@ function createSiteReplyRequest({ siteId, secret, chatId, text, nowSeconds = Mat
     return { endpoint, body, headers: { 'Content-Type': 'application/json', 'X-Handoff-Timestamp': timestamp, 'X-Handoff-Signature': signature } };
 }
 
+function createSitePhotoReplyRequest({ siteId, secret, chatId, imageBytes, mimeType, caption = '', nowSeconds = Math.floor(Date.now() / 1000), boundary = `----Instinct${crypto.randomBytes(18).toString('hex')}` }) {
+    if (String(siteId || '').toLowerCase() !== 'smsotps' || !secret) return { skipped: true, reason: 'site_reply_not_configured' };
+    const normalizedChatId = String(chatId ?? '').trim();
+    if (!/^-?\d{1,32}$/.test(normalizedChatId)) return { error: 'invalid_chat_id' };
+    if (!Buffer.isBuffer(imageBytes) || !imageBytes.length || imageBytes.length > 5 * 1024 * 1024) return { error: 'invalid_image' };
+    const normalizedMime = String(mimeType || '').toLowerCase();
+    if (!/^image\/(jpeg|png|gif|webp)$/.test(normalizedMime)) return { error: 'unsupported_image_type' };
+    if (typeof caption !== 'string' || caption.length > 1024) return { error: 'invalid_caption' };
+    if (!/^[A-Za-z0-9_-]{1,70}$/.test(boundary)) return { error: 'invalid_boundary' };
+    const parts = [];
+    const field = (name, value) => parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name=\"${name}\"\r\n\r\n${value}\r\n`, 'utf8'));
+    field('chat_id', normalizedChatId);
+    if (caption.trim()) field('caption', caption);
+    const ext = normalizedMime.split('/')[1].replace('jpeg', 'jpg');
+    parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"image.${ext}\"\r\nContent-Type: ${normalizedMime}\r\n\r\n`, 'utf8'));
+    parts.push(imageBytes);
+    parts.push(Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8'));
+    const rawBody = Buffer.concat(parts);
+    const timestamp = String(nowSeconds);
+    const signature = crypto.createHmac('sha256', secret).update(timestamp).update('.').update(rawBody).digest('hex');
+    return {
+        endpoint: REPLY_ENDPOINTS.smsotpsPhoto,
+        body: rawBody,
+        headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'X-Handoff-Timestamp': timestamp, 'X-Handoff-Signature': signature },
+    };
+}
+
+async function sendSitePhotoReply(options, fetchImpl = globalThis.fetch) {
+    const request = createSitePhotoReplyRequest(options);
+    if (request.skipped || request.error) return request;
+    try {
+        const response = await fetchImpl(request.endpoint, { method: 'POST', headers: request.headers, body: request.body, signal: AbortSignal.timeout(20000) });
+        return response.ok ? { success: true, status: response.status } : { error: 'site_rejected', status: response.status };
+    } catch (error) {
+        return { error: 'site_unavailable', message: String(error?.message || 'unknown').slice(0, 160) };
+    }
+}
+
 async function sendSiteReply(options, fetchImpl = globalThis.fetch) {
     const request = createSiteReplyRequest(options);
     if (request.skipped || request.error) return request;
@@ -83,4 +122,4 @@ function verifySiteHandoffSignature({ rawBody, timestamp, signature, secret, now
     return crypto.timingSafeEqual(expected, supplied) ? { value: { timestamp: Number(timestamp) } } : { error: 'invalid_signature' };
 }
 
-module.exports = { HANDOFF_ENDPOINTS, REPLY_ENDPOINTS, createHandoffRequest, notifySiteHandoff, createSiteReplyRequest, sendSiteReply, signSiteHandoffRequest, verifySiteHandoffSignature };
+module.exports = { HANDOFF_ENDPOINTS, REPLY_ENDPOINTS, createHandoffRequest, notifySiteHandoff, createSiteReplyRequest, sendSiteReply, createSitePhotoReplyRequest, sendSitePhotoReply, signSiteHandoffRequest, verifySiteHandoffSignature };

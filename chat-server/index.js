@@ -9,7 +9,7 @@ const maxmind = require('maxmind');
 const nodemailer = require('nodemailer');
 const { pollTelegramBots } = require('./telegram-polling');
 const { normalizeExternalChatEvent, verifyExternalChatSignature } = require('./external-chat-ingest');
-const { notifySiteHandoff, sendSiteReply } = require('./handoff-client');
+const { notifySiteHandoff, sendSiteReply, sendSitePhotoReply } = require('./handoff-client');
 const { telegramProfilePhotoUrl } = require('./telegram-profile');
 
 // Anonymous name generator (deprecated - widget now asks for name via form)
@@ -295,6 +295,7 @@ const wss = new WebSocket.Server({ server, maxPayload: 128 * 1024 });
 // HTTP Security Middlewares
 app.use(security.securityHeadersMiddleware);
 app.use(security.httpRateLimiter({ maxRequests: 200, windowMs: 60000 }));
+app.use('/api/telegram/ingest', express.json({ limit: '8mb', verify: (req, _res, body) => { req.rawBody = Buffer.from(body); } }));
 app.use(express.json({ limit: '256kb', verify: (req, _res, body) => {
     if (req.path === '/api/telegram/ingest') req.rawBody = Buffer.from(body);
 } }));
@@ -747,19 +748,19 @@ function updateSessionInfo(sessionId, metadata) {
 
 function getHistory(sessionId, callback, limit = null, beforeId = null, excludeSystem = false) {
     let query, params;
-    const senderFilter = excludeSystem ? " AND sender != 'system'" : "";
+    const senderFilter = excludeSystem ? " AND m.sender != 'system'" : "";
 
     if (beforeId) {
         // Load older messages (before given ID)
-        query = `SELECT id, sender, text, timestamp FROM messages WHERE session_id = ? AND id < ?${senderFilter} ORDER BY id DESC LIMIT ?`;
+        query = `SELECT m.id, m.sender, CASE WHEN mm.message_id IS NOT NULL THEN m.text || char(10) || '/api/telegram/messages/' || m.id || '/media' ELSE m.text END AS text, m.timestamp FROM messages m LEFT JOIN message_media mm ON mm.message_id = m.id WHERE m.session_id = ? AND m.id < ?${senderFilter} ORDER BY m.id DESC LIMIT ?`;
         params = [sessionId, beforeId, limit || 20];
     } else if (limit) {
         // Load latest messages with limit
-        query = `SELECT * FROM (SELECT id, sender, text, timestamp FROM messages WHERE session_id = ?${senderFilter} ORDER BY id DESC LIMIT ?) ORDER BY id ASC`;
+        query = `SELECT id, sender, text, timestamp FROM (SELECT m.id, m.sender, CASE WHEN mm.message_id IS NOT NULL THEN m.text || char(10) || '/api/telegram/messages/' || m.id || '/media' ELSE m.text END AS text, m.timestamp FROM messages m LEFT JOIN message_media mm ON mm.message_id = m.id WHERE m.session_id = ?${senderFilter} ORDER BY m.id DESC LIMIT ?) ORDER BY id ASC`;
         params = [sessionId, limit];
     } else {
         // Load all (fallback)
-        query = `SELECT id, sender, text, timestamp FROM messages WHERE session_id = ?${senderFilter} ORDER BY id ASC`;
+        query = `SELECT m.id, m.sender, CASE WHEN mm.message_id IS NOT NULL THEN m.text || char(10) || '/api/telegram/messages/' || m.id || '/media' ELSE m.text END AS text, m.timestamp FROM messages m LEFT JOIN message_media mm ON mm.message_id = m.id WHERE m.session_id = ?${senderFilter} ORDER BY m.id ASC`;
         params = [sessionId];
     }
     db.all(query, params, (err, rows) => {
@@ -1289,17 +1290,24 @@ app.post('/api/telegram/ingest', requireTicketAuth, verifyExternalChatAuth, secu
             args: [event.sessionId, event.sender, event.text, event.timestamp],
         });
         const messageId = Number(inserted.lastInsertRowid);
+        if (event.mediaBytes) {
+            await transaction.execute({
+                sql: 'INSERT INTO message_media (message_id, mime_type, data) VALUES (?, ?, ?)',
+                args: [messageId, event.mediaMime, new Uint8Array(event.mediaBytes)],
+            });
+        }
         await transaction.execute({
             sql: 'UPDATE external_messages SET message_id = ? WHERE source = ? AND source_message_id = ?',
             args: [messageId, source, event.sourceEventId],
         });
         await transaction.commit();
 
-        const info = { ...event.metadata, lastMessage: { text: event.text, timestamp: event.timestamp, sender: event.sender } };
+        const messageText = event.mediaBytes ? `${event.text}\n/api/telegram/messages/${messageId}/media` : event.text;
+        const info = { ...event.metadata, lastMessage: { text: messageText, timestamp: event.timestamp, sender: event.sender } };
         if (event.sender === 'client') {
-            broadcastToAdmins({ type: 'client_msg', from: event.sessionId, text: event.text, info, timestamp: event.timestamp, id: messageId });
+            broadcastToAdmins({ type: 'client_msg', from: event.sessionId, text: messageText, info, timestamp: event.timestamp, id: messageId });
         } else {
-            broadcastToAdmins({ type: 'api_msg_sent', targetId: event.sessionId, text: event.text, sender: event.sender, info, timestamp: event.timestamp, id: messageId });
+            broadcastToAdmins({ type: 'api_msg_sent', targetId: event.sessionId, text: messageText, sender: event.sender, info, timestamp: event.timestamp, id: messageId });
         }
         return res.status(201).json({ success: true, duplicate: false, session_id: event.sessionId, message_id: messageId });
     } catch (error) {
@@ -1385,14 +1393,69 @@ app.get(['/api/telegram/users/:siteId/:chatId/photo', '/api/telegram/users/:site
     } catch { res.status(502).end(); }
 });
 
+// Retrieve durable image bytes stored for a mirrored Telegram message.
+app.get('/api/telegram/messages/:messageId/media', requireAdminAuth, async (req, res) => {
+    const messageId = Number(req.params.messageId);
+    if (!Number.isSafeInteger(messageId) || messageId < 1) return res.status(400).end();
+    try {
+        const row = await db.getAsync('SELECT mime_type, data FROM message_media WHERE message_id = ?', [messageId]);
+        if (!row?.data) return res.status(404).end();
+        const bytes = Buffer.from(row.data);
+        res.set('Cache-Control', 'private, max-age=3600');
+        res.set('Content-Type', row.mime_type);
+        res.set('Content-Length', String(bytes.length));
+        return res.send(bytes);
+    } catch { return res.status(500).end(); }
+});
+
 // Send an image to Telegram via authenticated HTTP; WebSocket payloads are intentionally small.
 app.post('/api/telegram/users/:siteId/:chatId/send-photo', requireAdminAuth, express.raw({ type: /^image\//, limit: '8mb' }), async (req, res) => {
     const siteId = String(req.params.siteId || '').toLowerCase();
     const chatId = String(req.params.chatId || '');
-    if (siteId === 'smsotps') return res.status(501).json({ error: 'image_replies_not_supported_by_site_backend' });
     if (!/^[a-z0-9_-]{1,64}$/.test(siteId) || !/^-?\d{1,32}$/.test(chatId)) return res.status(400).json({ error: 'invalid_chat' });
-    if (!['fbverse_bot'].includes(siteId)) return res.status(403).json({ error: 'image_send_not_supported_for_site' });
     if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'empty_image' });
+    if (siteId === 'smsotps') {
+        if (req.body.length > 5 * 1024 * 1024) return res.status(413).json({ error: 'image_too_large' });
+        const contentType = String(req.headers['content-type'] || '').split(';')[0].toLowerCase();
+        let caption = '';
+        try { caption = decodeURIComponent(String(req.headers['x-image-caption-encoded'] || '')); } catch { return res.status(400).json({ error: 'invalid_caption' }); }
+        if (!/^image\/(jpeg|png|gif|webp)$/.test(contentType)) return res.status(415).json({ error: 'unsupported_image_type' });
+        if (caption.length > 1024) return res.status(400).json({ error: 'invalid_caption' });
+        const site = configLoader.getSiteById(siteId);
+        const result = await sendSitePhotoReply({ siteId, secret: site?.handoff_secret, chatId, imageBytes: req.body, mimeType: contentType, caption });
+        if (!result.success) return res.status(result.error === 'site_rejected' ? 502 : 503).json({ error: result.error || 'site_reply_unavailable', status: result.status });
+        const targetId = `telegram:site_${siteId}:${chatId}`;
+        const timestamp = new Date().toISOString();
+        const bodyText = `[photo]${caption.trim() ? ` ${caption.trim()}` : ''}`;
+        let transaction;
+        try {
+            transaction = await db.client.transaction('write');
+            const inserted = await transaction.execute({
+                sql: 'INSERT INTO messages (session_id, sender, text, timestamp) VALUES (?, ?, ?, ?)',
+                args: [targetId, 'internal_team', bodyText, timestamp],
+            });
+            const newId = Number(inserted.lastInsertRowid);
+            await transaction.execute({
+                sql: 'INSERT INTO message_media (message_id, mime_type, data) VALUES (?, ?, ?)',
+                args: [newId, contentType, new Uint8Array(req.body)],
+            });
+            await transaction.execute({
+                sql: 'UPDATE sessions SET updated_at = ? WHERE session_id = ?',
+                args: [timestamp, targetId],
+            });
+            await transaction.commit();
+            const text = `${bodyText}\n/api/telegram/messages/${newId}/media`;
+            sendToUserTabs(targetId, { text, sender: 'internal_team', timestamp, id: newId });
+            broadcastToAdmins({ type: 'admin_msg_sent', targetId, text, sender: 'internal_team', timestamp, id: newId });
+            return res.status(201).json({ success: true });
+        } catch (error) {
+            if (transaction) await transaction.rollback().catch(() => {});
+            return res.status(500).json({ error: 'media_store_failed' });
+        } finally {
+            if (transaction) transaction.close();
+        }
+    }
+    if (!['fbverse_bot'].includes(siteId)) return res.status(403).json({ error: 'image_send_not_supported_for_site' });
     try {
         const targetId = `telegram:site_${siteId}:${chatId}`;
         let metadata = clientInfo.get(targetId) || {};
@@ -1407,6 +1470,9 @@ app.post('/api/telegram/users/:siteId/:chatId/send-photo', requireAdminAuth, exp
         const form = new FormData();
         form.append('chat_id', chatId);
         form.append('photo', new Blob([req.body], { type: contentType }), 'image');
+        let imageCaption = '';
+        try { imageCaption = decodeURIComponent(String(req.headers['x-image-caption-encoded'] || '')).slice(0, 1024); } catch { return res.status(400).json({ error: 'invalid_caption' }); }
+        if (imageCaption) form.append('caption', imageCaption);
         const response = await fetch(`https://api.telegram.org/bot${bot.botToken}/sendPhoto`, { method: 'POST', body: form, signal: AbortSignal.timeout(20000) });
         const data = await response.json().catch(() => ({}));
         if (!response.ok || !data.ok) return res.status(502).json({ error: 'telegram_send_failed', description: String(data.description || '').slice(0, 160) });
