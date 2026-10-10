@@ -56,8 +56,8 @@ test('creates a fixed signed SMSOTPS reply request without bearer secrets', () =
 
 test('sends signed site reply and only reports success from the site', async () => {
     let sent;
-    const result = await sendSiteReply({ siteId: 'smsotps', secret: 's', chatId: '1', text: 'hi', nowSeconds: 1791482400 }, async (url, options) => { sent = { url, options }; return { ok: true, status: 200 }; });
-    assert.deepEqual(result, { success: true, status: 200 });
+    const result = await sendSiteReply({ siteId: 'smsotps', secret: 's', chatId: '1', text: 'hi', nowSeconds: 1791482400 }, async (url, options) => { sent = { url, options }; return { ok: true, status: 200, json: async () => ({ telegram_message_id: 456 }) }; });
+    assert.deepEqual(result, { success: true, status: 200, telegramMessageId: '456' });
     assert.equal(sent.url, REPLY_ENDPOINTS.smsotps);
     assert.equal(sent.options.method, 'POST');
     assert.equal(sent.options.body, JSON.stringify({ chat_id: '1', text: 'hi' }));

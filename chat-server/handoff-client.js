@@ -106,7 +106,10 @@ async function sendSiteReply(options, fetchImpl = globalThis.fetch) {
     if (request.skipped || request.error) return request;
     try {
         const response = await fetchImpl(request.endpoint, { method: 'POST', headers: request.headers, body: request.body, signal: AbortSignal.timeout(10000) });
-        return response.ok ? { success: true, status: response.status } : { error: 'site_rejected', status: response.status };
+        if (!response.ok) return { error: 'site_rejected', status: response.status };
+        const payload = await response.json().catch(() => ({}));
+        const telegramMessageId = String(payload?.telegram_message_id ?? '');
+        return { success: true, status: response.status, ...( /^[1-9]\d{0,31}$/.test(telegramMessageId) ? { telegramMessageId } : {}) };
     } catch (error) {
         return { error: 'site_unavailable', message: String(error?.message || 'unknown').slice(0, 160) };
     }

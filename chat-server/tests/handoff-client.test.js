@@ -53,9 +53,9 @@ test('serializes numeric SMSOTPS reply chat IDs as JSON strings before signing a
     let sent;
     const result = await sendSiteReply(options, async (url, init) => {
         sent = { url, init };
-        return { ok: true, status: 200 };
+        return { ok: true, status: 200, json: async () => ({ telegram_message_id: 456 }) };
     });
-    assert.deepEqual(result, { success: true, status: 200 });
+    assert.deepEqual(result, { success: true, status: 200, telegramMessageId: '456' });
     assert.equal(sent.url, REPLY_ENDPOINTS.smsotps);
     assert.equal(sent.init.body, request.body);
 });

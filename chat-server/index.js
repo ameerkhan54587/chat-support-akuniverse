@@ -12,6 +12,7 @@ const { normalizeExternalChatEvent, verifyExternalChatSignature } = require('./e
 const { notifySiteHandoff, sendSiteReply, sendSitePhotoReply } = require('./handoff-client');
 const { telegramProfilePhotoUrl } = require('./telegram-profile');
 const { parsePhotoBody } = require('./photo-body-parser');
+const { persistTelegramAdminReply } = require('./admin-reply-persistence');
 
 // Anonymous name generator (deprecated - widget now asks for name via form)
 // const ANON_ADJECTIVES = [
@@ -806,7 +807,7 @@ function runAdminReply(targetId, rawText, ws) {
             const site = configLoader.getSiteById(siteId);
             const result = await sendSiteReply({ siteId, secret: site?.handoff_secret, apiKey: site?.api_key, chatId, text });
             if (!result.success) throw new Error(result.error === 'site_rejected' ? `SMSOTPS rejected reply (${result.status}).` : 'SMSOTPS reply endpoint is not configured or unavailable.');
-            return result;
+            return { ...result, sourceMessageId: result.telegramMessageId ? `telegram:${chatId}:${result.telegramMessageId}` : '' };
         }
         if (text.startsWith('data:image/')) throw new Error('Upload images through the authenticated image endpoint.');
         else {
@@ -818,8 +819,22 @@ function runAdminReply(targetId, rawText, ws) {
         }
         return { success: true };
     };
-    sendResult().then(() => {
+    sendResult().then(async (result) => {
         const timestamp = new Date().toISOString();
+        if (targetId.startsWith('telegram:site_smsotps:') && result?.sourceMessageId) {
+            const persisted = await persistTelegramAdminReply({
+                db,
+                sessionId: targetId,
+                text: persistedText,
+                timestamp,
+                source: 'laravel:smsotps',
+                sourceMessageId: result.sourceMessageId,
+            });
+            if (!persisted.persisted) return;
+            sendToUserTabs(targetId, { text: persistedText, sender: 'internal_team', timestamp, id: persisted.id });
+            broadcastToAdmins({ type: 'admin_msg_sent', targetId, text: persistedText, sender: 'internal_team', timestamp, id: persisted.id });
+            return;
+        }
         saveMessage(targetId, 'internal_team', persistedText, timestamp, (newId) => {
             sendToUserTabs(targetId, { text: persistedText, sender: 'internal_team', timestamp, id: newId });
             broadcastToAdmins({ type: 'admin_msg_sent', targetId, text: persistedText, sender: 'internal_team', timestamp, id: newId });
