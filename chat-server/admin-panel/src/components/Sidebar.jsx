@@ -2,7 +2,7 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useChat } from '../context/ChatContext';
 import { useTranslation } from '../i18n';
-import { getTimeString } from '../utils/dateUtils';
+import { formatRelativeTime } from '../utils/relativeTime';
 import { ConfirmModal } from './ConfirmModal';
 import { EditUserModal } from './EditUserModal';
 import { ticketsForChat, conversationsForBrand, getConversationChannel, TELEGRAM_BRAND_TABS } from '../utils/ticketChat';
@@ -29,6 +29,11 @@ export function Sidebar({
   const channelFilteredUsers = useMemo(() => activeBrand ? conversationsForBrand(users, usersInfo, activeBrand.id) : [], [users, usersInfo, activeBrand]);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [editUserId, setEditUserId] = useState(null);
+  const [relativeTimeNow, setRelativeTimeNow] = useState(() => Date.now());
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setRelativeTimeNow(Date.now()), 30_000);
+    return () => window.clearInterval(intervalId);
+  }, []);
 
 
   // Search state
@@ -436,7 +441,7 @@ export function Sidebar({
                         {usersInfo[userId]?.lastMessage ? (
                           <div className="flex items-center gap-1 mt-0.5">
                             <span className="text-xs text-gray-500 flex-shrink-0">
-                              {getTimeString(usersInfo[userId].lastMessage.timestamp, config.timeFormat, config.timezone)}
+                              {formatRelativeTime(usersInfo[userId].lastMessage.timestamp, relativeTimeNow, config.timezone, config.dateFormat)}
                             </span>
                             <span className={`text-xs truncate ${hasUnread ? 'font-bold text-gray-900 dark:text-white' : 'text-gray-500 dark:text-slate-400'}`}>
                 {usersInfo[userId].lastMessage.sender === 'client' ? 'Customer: ' : usersInfo[userId].lastMessage.sender === 'support' ? 'AI: ' : usersInfo[userId].lastMessage.sender === 'internal_team' ? 'You: ' : ''}{String(usersInfo[userId].lastMessage.text || '').startsWith('/api/telegram/users/') ? '📷 Photo' : usersInfo[userId].lastMessage.text}
