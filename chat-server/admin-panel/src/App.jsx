@@ -21,7 +21,7 @@ import {
 } from './utils/browserNotification';
 
 function AppContent() {
-  const { state, setActiveUser, clearNotification } = useChat();
+  const { state, setActiveUser, clearNotification, addOptimisticMessage, failOptimisticMessage } = useChat();
   const { t, changeLanguage } = useTranslation();
   const [activeModal, setActiveModal] = useState(null);
   const [toast, setToast] = useState(null);
@@ -60,9 +60,29 @@ function AppContent() {
   }, [telegramIdentity, telegramSiteId, telegramChatId, state.config.apiToken]);
   const toggleTelegramBlock = async () => {
     if (!telegramIdentity) return;
-    const method = telegramBlocked ? 'DELETE' : 'PUT';
-    const response = await fetch(`/api/telegram/users/${encodeURIComponent(telegramIdentity.siteId)}/${encodeURIComponent(telegramIdentity.chatId)}/block`, { method, headers: { Authorization: `Bearer ${state.config.apiToken}` } });
-    if (response.ok) setTelegramBlocked(!telegramBlocked);
+    const wasBlocked = telegramBlocked;
+    const method = wasBlocked ? 'DELETE' : 'PUT';
+    try {
+      const response = await fetch(`/api/telegram/users/${encodeURIComponent(telegramIdentity.siteId)}/${encodeURIComponent(telegramIdentity.chatId)}/block`, { method, headers: { Authorization: `Bearer ${state.config.apiToken}` } });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (result.local_blocked === true) setTelegramBlocked(true);
+        showToast(telegramIdentity.siteId === 'smsotps' ? 'Block state sync failed. The local block is kept; do not treat this as synced.' : 'Block state update failed.', 'error');
+        return;
+      }
+      if (result.synced !== true) {
+        showToast('Block state was not confirmed by both systems.', 'error');
+        return;
+      }
+      setTelegramBlocked(Boolean(result.blocked));
+      showToast(result.blocked ? 'Blocked and synced.' : 'Unblocked and synced.', 'success');
+    } catch {
+      fetch(`/api/telegram/users/${encodeURIComponent(telegramIdentity.siteId)}/${encodeURIComponent(telegramIdentity.chatId)}/status`, { headers: { Authorization: `Bearer ${state.config.apiToken}` } })
+        .then(response => response.ok ? response.json() : null)
+        .then(result => { if (result) setTelegramBlocked(Boolean(result.blocked)); })
+        .catch(() => {});
+      showToast('Block state update could not be confirmed. Check the current state before changing it again.', 'error');
+    }
   };
   const toggleTelegramMute = () => {
     if (!state.activeUserId) return;
@@ -340,7 +360,13 @@ function AppContent() {
     }
     replyIdRef.current += 1;
     const clientMessageId = `${targetId}:${Date.now()}:${replyIdRef.current}`;
-    sendReply(targetId, text, clientMessageId);
+    addOptimisticMessage({ id: `pending:${clientMessageId}`, clientMessageId, userId: targetId, sender: 'internal_team', text, timestamp: new Date().toISOString(), status: 'pending' });
+    if (!sendReply(targetId, text, clientMessageId)) {
+      failOptimisticMessage(targetId, clientMessageId);
+      getHistory(targetId);
+      showToast('Send unconfirmed. Check the conversation before retrying.', 'error');
+      return false;
+    }
     return true;
   };
 

@@ -4,6 +4,7 @@ const WebSocket = require('ws');
 const url = require('url');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const maxmind = require('maxmind');
 const nodemailer = require('nodemailer');
@@ -62,6 +63,7 @@ let businessHoursConfig = {};
 let smtpConfig = { host: '', port: '', user: '', password: '', fromName: '', ssl: true };
 let telegramConfig = { botToken: '', chatId: '', enabled: 0, lastUpdateId: 0 };
 let telegramBots = [];
+let smsotpsBlockReconciled = false;
 let telegramPollInFlight = false;
 let telegramPollTimeout = null;
 
@@ -265,8 +267,16 @@ function syncSiteTelegramBots() {
 
 // Initialize Turso/SQLite Database schema and load admin settings
 initDatabase(db).then(() => {
-    loadAdminConfigFromDb(() => {
+    loadAdminConfigFromDb(async () => {
         refreshSiteDbMap();
+        const reconcile = await reconcileSmsotpsBlockSnapshot(configLoader.getSiteById('smsotps')?.handoff_secret);
+        if (reconcile.success) {
+            smsotpsBlockReconciled = true;
+            console.info(`[Block sync] SMSOTPS snapshot reconciled (${reconcile.count} blocked chats).`);
+        } else {
+            smsotpsBlockReconciled = false;
+            console.error(`[Block sync] SMSOTPS snapshot reconciliation failed: ${reconcile.error}${reconcile.status ? ` (${reconcile.status})` : ''}. Existing block list remains local.`);
+        }
         syncSiteTelegramBots();
         if (telegramConfig.enabled && telegramConfig.botToken && typeof startTelegramBot === 'function' && !telegramPollTimeout) {
             setTimeout(() => {
@@ -430,6 +440,66 @@ function getMaskedTelegramConfig() {
             enabled: !!bot.enabled,
         }))
     };
+}
+
+function getTelegramBotStrict(botId) {
+    if (!botId) return null;
+    return telegramBots.find(bot => bot.id === botId || bot.siteId === botId || bot.botToken === botId || bot.username === botId) || null;
+}
+
+async function fetchSmsotpsProfilePhoto(chatId, secret) {
+    if (!secret || !/^-?\d{1,32}$/.test(String(chatId))) return null;
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const signature = crypto.createHmac('sha256', secret).update(`${timestamp}.${chatId}.profile-photo`).digest('hex');
+    try {
+        const response = await fetch(`https://api.smsotps.com/api/support/telegram/users/${encodeURIComponent(chatId)}/photo`, {
+            headers: { 'X-Handoff-Timestamp': timestamp, 'X-Handoff-Signature': signature },
+            signal: AbortSignal.timeout(12000),
+        });
+        if (!response.ok) return null;
+        const mime = String(response.headers.get('content-type') || '').split(';')[0].toLowerCase();
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(mime)) return null;
+        const bytes = Buffer.from(await response.arrayBuffer());
+        if (!bytes.length || bytes.length > 2 * 1024 * 1024) return null;
+        return { bytes, mime };
+    } catch { return null; }
+}
+
+async function reconcileSmsotpsBlockSnapshot(secret) {
+    if (!secret) return { error: 'sync_not_configured' };
+    let rows;
+    try { rows = await db.allAsync("SELECT chat_id FROM blocked_telegram_users WHERE site_id = 'smsotps'"); }
+    catch { return { error: 'console_block_snapshot_unavailable' }; }
+    const chatIds = [...new Set(rows.map(row => String(row.chat_id)))].sort();
+    if (chatIds.some(id => !/^-?\d{1,32}$/.test(id))) return { error: 'invalid_local_block_id' };
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const body = JSON.stringify({ site_id: 'smsotps', blocked_chat_ids: chatIds });
+    const signature = crypto.createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex');
+    try {
+        const response = await fetch('https://api.smsotps.com/api/support/block-reconcile', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Handoff-Timestamp': timestamp, 'X-Handoff-Signature': signature },
+            body, signal: AbortSignal.timeout(10000),
+        });
+        if (!response.ok) return { error: 'laravel_reconcile_rejected', status: response.status };
+        const result = await response.json().catch(() => null);
+        return result?.ok === true && result.reconciled === true && result.blocked_count === chatIds.length ? { success: true, count: chatIds.length } : { error: 'laravel_reconcile_unconfirmed' };
+    } catch { return { error: 'laravel_reconcile_unavailable' }; }
+}
+
+async function syncSmsotpsBlockState(chatId, blocked, secret) {
+    if (!secret || !/^-?\d{1,32}$/.test(String(chatId)) || typeof blocked !== 'boolean') return { error: 'sync_not_configured' };
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const body = JSON.stringify({ site_id: 'smsotps', chat_id: String(chatId), blocked });
+    const signature = crypto.createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex');
+    try {
+        const response = await fetch('https://api.smsotps.com/api/support/block-sync', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Handoff-Timestamp': timestamp, 'X-Handoff-Signature': signature },
+            body, signal: AbortSignal.timeout(5000),
+        });
+        if (!response.ok) return { error: 'laravel_sync_rejected', status: response.status };
+        const result = await response.json().catch(() => null);
+        return result?.ok === true && result.blocked === blocked && result.chat_id === String(chatId) ? { success: true } : { error: 'laravel_sync_unconfirmed' };
+    } catch { return { error: 'laravel_sync_unavailable' }; }
 }
 
 function getTelegramBot(botId) {
@@ -601,7 +671,12 @@ async function processTelegramUpdate(update, bot) {
         return;
     }
     if (message.chat.type === 'private' && bot.siteId) {
-        const blocked = await db.getAsync('SELECT 1 AS blocked FROM blocked_telegram_users WHERE site_id = ? AND chat_id = ?', [String(bot.siteId), String(message.chat.id)]).catch(() => null);
+        let blocked;
+        try {
+            blocked = await db.getAsync('SELECT 1 AS blocked FROM blocked_telegram_users WHERE site_id = ? AND chat_id = ?', [String(bot.siteId), String(message.chat.id)]);
+        } catch {
+            if (String(bot.siteId).toLowerCase() === 'smsotps') return;
+        }
         if (blocked) return;
     }
 
@@ -791,7 +866,7 @@ function getAllSessions(callback) {
             ORDER BY s.updated_at DESC`, [], (err, rows) => { if (!err) callback(rows); });
 }
 
-function runAdminReply(targetId, rawText, ws) {
+function runAdminReply(targetId, rawText, ws, clientMessageId) {
     const text = typeof rawText === 'string' ? rawText.trim() : '';
     let persistedText = text;
     const sendResult = async () => {
@@ -832,16 +907,16 @@ function runAdminReply(targetId, rawText, ws) {
             });
             if (!persisted.persisted) return;
             sendToUserTabs(targetId, { text: persistedText, sender: 'internal_team', timestamp, id: persisted.id });
-            broadcastToAdmins({ type: 'admin_msg_sent', targetId, text: persistedText, sender: 'internal_team', timestamp, id: persisted.id });
+            broadcastToAdmins({ type: 'admin_msg_sent', targetId, text: persistedText, sender: 'internal_team', timestamp, id: persisted.id, clientMessageId });
             return;
         }
         saveMessage(targetId, 'internal_team', persistedText, timestamp, (newId) => {
             sendToUserTabs(targetId, { text: persistedText, sender: 'internal_team', timestamp, id: newId });
-            broadcastToAdmins({ type: 'admin_msg_sent', targetId, text: persistedText, sender: 'internal_team', timestamp, id: newId });
+            broadcastToAdmins({ type: 'admin_msg_sent', targetId, text: persistedText, sender: 'internal_team', timestamp, id: newId, clientMessageId });
         });
     }).catch((error) => {
         console.warn(`[Admin reply] ${String(error?.message || 'unknown').slice(0, 160)}`);
-        ws.send(JSON.stringify({ type: 'system', text: `Reply failed: ${String(error?.message || 'unknown').slice(0, 160)}` }));
+        ws.send(JSON.stringify({ type: 'admin_reply_failed', targetId, clientMessageId, text: `Reply failed: ${String(error?.message || 'unknown').slice(0, 160)}` }));
     });
 }
 
@@ -1380,7 +1455,17 @@ app.delete('/api/sites/:id', requireAdminAuth, (req, res) => {
 // Authenticated Telegram media proxies. Telegram Update objects do not contain stable profile-photo URLs.
 app.get(['/api/telegram/users/:siteId/:chatId/photo', '/api/telegram/users/:siteId/:chatId/media/:fileId'], requireAdminAuth, async (req, res) => {
     try {
-        const bot = getTelegramBot(`site_${String(req.params.siteId).toLowerCase()}`);
+        const siteId = String(req.params.siteId).toLowerCase();
+        const bot = getTelegramBotStrict(`site_${siteId}`);
+        if (siteId === 'smsotps' && !req.params.fileId && req.path.endsWith('/photo')) {
+            const site = configLoader.getSiteById('smsotps');
+            const result = await fetchSmsotpsProfilePhoto(String(req.params.chatId), site?.handoff_secret);
+            if (!result) return res.status(404).end();
+            res.set('Cache-Control', 'private, max-age=3600');
+            res.set('Content-Type', result.mime);
+            res.set('Content-Length', String(result.bytes.length));
+            return res.send(result.bytes);
+        }
         if (!bot?.botToken) return res.status(404).end();
         let fileId = req.params.fileId || '';
         if (!fileId && req.path.endsWith('/photo')) {
@@ -1531,15 +1616,32 @@ app.get('/api/telegram/users/:siteId/:chatId/status', requireAdminAuth, async (r
 
 app.put('/api/telegram/users/:siteId/:chatId/block', requireAdminAuth, async (req, res) => {
     try {
-        await db.runAsync('INSERT INTO blocked_telegram_users (site_id, chat_id) VALUES (?, ?) ON CONFLICT(site_id, chat_id) DO NOTHING', [String(req.params.siteId).toLowerCase(), String(req.params.chatId)]);
-        res.json({ blocked: true });
+        const siteId = String(req.params.siteId).toLowerCase();
+        const chatId = String(req.params.chatId);
+        await db.runAsync('INSERT INTO blocked_telegram_users (site_id, chat_id) VALUES (?, ?) ON CONFLICT(site_id, chat_id) DO NOTHING', [siteId, chatId]);
+        if (siteId === 'smsotps') {
+            const sync = await syncSmsotpsBlockState(chatId, true, configLoader.getSiteById('smsotps')?.handoff_secret);
+            if (!sync.success) return res.status(502).json({ error: sync.error, status: sync.status, blocked: true, local_blocked: true });
+        }
+        res.json({ blocked: true, synced: true });
     } catch { res.status(500).json({ error: 'db_error' }); }
 });
 
 app.delete('/api/telegram/users/:siteId/:chatId/block', requireAdminAuth, async (req, res) => {
     try {
-        await db.runAsync('DELETE FROM blocked_telegram_users WHERE site_id = ? AND chat_id = ?', [String(req.params.siteId).toLowerCase(), String(req.params.chatId)]);
-        res.json({ blocked: false });
+        const siteId = String(req.params.siteId).toLowerCase();
+        const chatId = String(req.params.chatId);
+        if (siteId === 'smsotps') {
+            const sync = await syncSmsotpsBlockState(chatId, false, configLoader.getSiteById('smsotps')?.handoff_secret);
+            if (!sync.success) return res.status(502).json({ error: sync.error, status: sync.status, blocked: true, local_blocked: true });
+        }
+        try {
+            await db.runAsync('DELETE FROM blocked_telegram_users WHERE site_id = ? AND chat_id = ?', [siteId, chatId]);
+        } catch (error) {
+            if (siteId === 'smsotps') await syncSmsotpsBlockState(chatId, true, configLoader.getSiteById('smsotps')?.handoff_secret);
+            throw error;
+        }
+        res.json({ blocked: false, synced: true });
     } catch { res.status(500).json({ error: 'db_error' }); }
 });
 
@@ -2006,7 +2108,7 @@ wss.on('connection', (ws, req) => {
                             const targetId = String(data.targetId || '');
                             const text = typeof data.text === 'string' ? data.text.trim() : '';
                             if (!text || text.length > 4000) {
-                                ws.send(JSON.stringify({ type: 'system', text: 'Reply must be between 1 and 4000 characters.' }));
+                                ws.send(JSON.stringify({ type: 'admin_reply_failed', targetId, clientMessageId: data.clientMessageId, text: 'Reply must be between 1 and 4000 characters.' }));
                                 return;
                             }
                             const clientMessageId = typeof data.clientMessageId === 'string' ? data.clientMessageId.slice(0, 120) : '';
@@ -2015,9 +2117,9 @@ wss.on('connection', (ws, req) => {
                                 return;
                             }
                             db.run('INSERT INTO admin_reply_keys (session_id, client_message_id) VALUES (?, ?) ON CONFLICT(session_id, client_message_id) DO NOTHING', [targetId, clientMessageId], function(err) {
-                                if (err) { ws.send(JSON.stringify({ type: 'system', text: 'Reply could not be queued safely. Please retry.' })); return; }
+                                if (err) { ws.send(JSON.stringify({ type: 'admin_reply_failed', targetId, clientMessageId, text: 'Reply could not be queued safely. Please retry.' })); return; }
                                 if (this.changes === 0) return;
-                                runAdminReply(targetId, data.text, ws);
+                                runAdminReply(targetId, data.text, ws, clientMessageId);
                             });
                             return;
                         }

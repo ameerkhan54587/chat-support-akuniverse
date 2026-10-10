@@ -9,6 +9,7 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
   const wsRef = useRef(null);
   const activeUserIdRef = useRef(null);
   const handleMessageRef = useRef(null);
+  const sendRef = useRef(null);
   const onAuthErrorRef = useRef(null);
   const onSystemMessageRef = useRef(onSystemMessage);
   const passwordRef = useRef(null);
@@ -30,6 +31,8 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
     prependMessages,
     setLoadingMore,
     addMessage,
+    confirmOptimisticMessage,
+    failOptimisticMessage,
     deleteMessage,
     deleteSystemMessagesFromState,
     setTyping,
@@ -212,11 +215,19 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
         }
         break;
 
+      case 'admin_reply_failed':
+        failOptimisticMessage(data.targetId, data.clientMessageId);
+        if (data.targetId === activeUserIdRef.current) sendRef.current?.({ type: 'get_history', targetId: data.targetId });
+        if (onSystemMessageRef.current) onSystemMessageRef.current('Send unconfirmed. Syncing chat; please check before retrying.');
+        break;
+
       case 'api_msg_sent':
       case 'admin_msg_sent': {
         if (data.info) updateUserInfo(data.targetId, data.info);
         const outboundSender = data.sender || (data.type === 'admin_msg_sent' ? 'internal_team' : 'support');
-        if (data.targetId === activeUserIdRef.current) {
+        if (data.type === 'admin_msg_sent' && data.clientMessageId) {
+          confirmOptimisticMessage({ id: data.id, clientMessageId: data.clientMessageId, userId: data.targetId, sender: outboundSender, text: data.text, timestamp: data.timestamp });
+        } else if (data.targetId === activeUserIdRef.current) {
           addMessage({
             id: data.id,
             userId: data.targetId,
@@ -337,6 +348,8 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
     updateUserInfo,
     setMessages,
     addMessage,
+    confirmOptimisticMessage,
+    failOptimisticMessage,
     deleteMessage,
     deleteSystemMessagesFromState,
     setTyping,
@@ -514,11 +527,15 @@ export function useWebSocket(onSystemMessage, soundEnabled = true) {
   const send = useCallback((data) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(data));
+      return true;
     }
+    return false;
   }, []);
 
+  useEffect(() => { sendRef.current = send; }, [send]);
+
   const sendReply = useCallback((targetId, text, clientMessageId) => {
-    send({ type: 'admin_reply', targetId, text, clientMessageId });
+    return send({ type: 'admin_reply', targetId, text, clientMessageId });
   }, [send]);
 
   const getHistory = useCallback((targetId) => {

@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useReducer, useCallback } from 'react';
+import { optimisticMessageReducer } from './optimisticMessages.js';
 
 const ChatContext = createContext(null);
 
@@ -48,6 +49,7 @@ const initialState = {
 };
 
 function chatReducer(state, action) {
+  if (['ADD_OPTIMISTIC_MESSAGE', 'CONFIRM_OPTIMISTIC_MESSAGE', 'FAIL_OPTIMISTIC_MESSAGE'].includes(action.type)) return optimisticMessageReducer(state, action);
   switch (action.type) {
     case 'SET_AUTHENTICATED':
       return { ...state, isAuthenticated: action.payload, isAuthChecking: false };
@@ -303,6 +305,18 @@ export function ChatProvider({ children }) {
     dispatch({ type: 'ADD_MESSAGE', payload: message });
   }, []);
 
+  const addOptimisticMessage = useCallback((message) => {
+    dispatch({ type: 'ADD_OPTIMISTIC_MESSAGE', payload: message });
+  }, []);
+
+  const confirmOptimisticMessage = useCallback((message) => {
+    dispatch({ type: 'CONFIRM_OPTIMISTIC_MESSAGE', payload: message });
+  }, []);
+
+  const failOptimisticMessage = useCallback((userId, clientMessageId) => {
+    dispatch({ type: 'FAIL_OPTIMISTIC_MESSAGE', payload: { userId, clientMessageId } });
+  }, []);
+
   const deleteMessage = useCallback((msgId) => {
     dispatch({ type: 'DELETE_MESSAGE', payload: msgId });
   }, []);
@@ -347,6 +361,9 @@ export function ChatProvider({ children }) {
     setLoadingMore,
     setHasMore,
     addMessage,
+    addOptimisticMessage,
+    confirmOptimisticMessage,
+    failOptimisticMessage,
     deleteMessage,
     deleteSystemMessagesFromState,
     setTyping,

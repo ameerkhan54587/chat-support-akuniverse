@@ -7,13 +7,13 @@ export function Message({ message, config, onDelete }) {
   const [mediaSources, setMediaSources] = useState({ key: '', urls: [] });
   const isClient = message.sender === 'client';
   const label = message.sender === 'internal_team' ? 'Human agent' : message.sender === 'support' ? 'AI support' : (isClient ? 'Customer' : 'Support');
-  const media = String(message.text || '').match(/\/api\/telegram\/users\/[^\s]+/g) || [];
+  const media = String(message.text || '').match(/\/api\/telegram\/(?:users\/[^\s]+|messages\/\d+\/media)/g) || [];
   const mediaKey = media.join('|');
   const messageText = String(message.text || '');
   useEffect(() => {
     let cancelled = false;
     let objectUrls = [];
-    const paths = messageText.match(/\/api\/telegram\/users\/[^\s]+/g) || [];
+    const paths = messageText.match(/\/api\/telegram\/(?:users\/[^\s]+|messages\/\d+\/media)/g) || [];
     Promise.all(paths.map(url => fetch(url, { headers: { Authorization: `Bearer ${config?.apiToken || ''}` } }).then(response => {
       if (!response.ok) throw new Error('Image unavailable');
       return response.blob();
@@ -27,7 +27,7 @@ export function Message({ message, config, onDelete }) {
       objectUrls.forEach(URL.revokeObjectURL);
     };
   }, [message.id, config?.apiToken, mediaKey, messageText]);
-  const bodyText = messageText.replace(/\/api\/telegram\/users\/[^\s]+/g, '').trim();
+  const bodyText = messageText.replace(/\/api\/telegram\/(?:users\/[^\s]+|messages\/\d+\/media)/g, '').trim();
 
   const renderText = (text) => {
     const parts = linkify(text);
@@ -51,7 +51,7 @@ export function Message({ message, config, onDelete }) {
 
   return (
     <div
-      className={`flex mb-3 ${isClient ? 'justify-start' : 'justify-end'}`}
+      className={`flex mb-3 ${isClient ? 'justify-start' : 'justify-end'} ${message.status === 'pending' || message.status === 'unconfirmed' ? 'opacity-70' : ''}`}
       onMouseEnter={() => setShowDelete(true)}
       onMouseLeave={() => setShowDelete(false)}
       onFocus={() => setShowDelete(true)} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setShowDelete(false); }}
@@ -88,7 +88,7 @@ export function Message({ message, config, onDelete }) {
             isClient ? 'text-left' : 'text-right'
           }`}
         >
-          {getTimeString(message.timestamp, config.timeFormat, config.timezone)}
+          {message.status === 'pending' ? 'Sending…' : message.status === 'unconfirmed' ? 'Send unconfirmed - syncing…' : getTimeString(message.timestamp, config.timeFormat, config.timezone)}
         </div>
       </div>
     </div>
