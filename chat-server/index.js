@@ -11,6 +11,7 @@ const { pollTelegramBots } = require('./telegram-polling');
 const { normalizeExternalChatEvent, verifyExternalChatSignature } = require('./external-chat-ingest');
 const { notifySiteHandoff, sendSiteReply, sendSitePhotoReply } = require('./handoff-client');
 const { telegramProfilePhotoUrl } = require('./telegram-profile');
+const { parsePhotoBody } = require('./photo-body-parser');
 
 // Anonymous name generator (deprecated - widget now asks for name via form)
 // const ANON_ADJECTIVES = [
@@ -296,6 +297,7 @@ const wss = new WebSocket.Server({ server, maxPayload: 128 * 1024 });
 app.use(security.securityHeadersMiddleware);
 app.use(security.httpRateLimiter({ maxRequests: 200, windowMs: 60000 }));
 app.use('/api/telegram/ingest', express.json({ limit: '8mb', verify: (req, _res, body) => { req.rawBody = Buffer.from(body); } }));
+app.use(parsePhotoBody);
 app.use(express.json({ limit: '256kb', verify: (req, _res, body) => {
     if (req.path === '/api/telegram/ingest') req.rawBody = Buffer.from(body);
 } }));
@@ -1409,7 +1411,7 @@ app.get('/api/telegram/messages/:messageId/media', requireAdminAuth, async (req,
 });
 
 // Send an image to Telegram via authenticated HTTP; WebSocket payloads are intentionally small.
-app.post('/api/telegram/users/:siteId/:chatId/send-photo', requireAdminAuth, express.raw({ type: /^image\//, limit: '8mb' }), async (req, res) => {
+app.post('/api/telegram/users/:siteId/:chatId/send-photo', requireAdminAuth, async (req, res) => {
     const siteId = String(req.params.siteId || '').toLowerCase();
     const chatId = String(req.params.chatId || '');
     if (!/^[a-z0-9_-]{1,64}$/.test(siteId) || !/^-?\d{1,32}$/.test(chatId)) return res.status(400).json({ error: 'invalid_chat' });
