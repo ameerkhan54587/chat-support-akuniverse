@@ -518,7 +518,7 @@ function AppContent() {
         </div>
       </div>
 
-      <footer title="Release v0.12.6" className="shrink-0 px-3 py-1 text-[10px] text-slate-500 text-right bg-white dark:bg-[#0b1120] border-t border-gray-200 dark:border-slate-700">AKUniverse Console · v0.12.6</footer>
+      <footer title="Release v0.12.8" className="shrink-0 px-3 py-1 text-[10px] text-slate-500 text-right bg-white dark:bg-[#0b1120] border-t border-gray-200 dark:border-slate-700">AKUniverse Console · v0.12.8</footer>
 
       {/* Modals */}
       <ConfirmModal
