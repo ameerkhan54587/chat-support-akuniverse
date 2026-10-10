@@ -340,7 +340,6 @@ export function Sidebar({
 
                 const online = isUserOnline(userId);
                 const info = usersInfo[userId] || {};
-                const channel = getUserChannel(userId, info);
                 const unreadCount = Number(notifications[userId]) || (notifications[userId] ? 1 : 0);
                 const hasUnread = unreadCount > 0;
                 const chatTickets = ticketsForChat(tickets, userId, info);
@@ -380,11 +379,6 @@ export function Sidebar({
                             hasUnread ? 'font-bold text-gray-950 dark:text-white text-sm' : 'font-semibold text-gray-800 dark:text-slate-100 text-sm'
                           }`}>
                             <span className="truncate">{getUserName(userId)}</span>
-                            {getBotName(userId) && (
-                              <span className="inline-flex rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 flex-shrink-0">
-                                {getBotName(userId)}
-                              </span>
-                            )}
                             {chatTickets.length > 0 && (
                               <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-semibold flex-shrink-0 ${openTicketCount ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-gray-50 text-gray-600 border-gray-200'}`} title={`${chatTickets.length} support ticket${chatTickets.length === 1 ? '' : 's'} in this chat`}>
                                 🎫 {openTicketCount || chatTickets.length}
@@ -416,34 +410,19 @@ export function Sidebar({
                             )}
                           </div>
 
-                          {/* Channel Badge Pill & Unread Pill */}
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            {hasUnread && (
-                              <span className="bg-red-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full shadow-xs animate-pulse">
-                                {unreadCount} new
-                              </span>
-                            )}
-                            {channel === 'telegram' ? (
-                              <span className="text-[10px] bg-sky-50 text-sky-700 px-1.5 py-0.5 rounded font-medium border border-sky-200">
-                                ✈️ Telegram
-                              </span>
-                            ) : channel === 'email' ? (
-                              <span className="text-[10px] bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded font-medium border border-amber-200">
-                                ✉️ Email
-                              </span>
-                            ) : (
-                              <span className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-medium border border-blue-200">
-                                🌐 Widget
-                              </span>
-                            )}
-                          </div>
+                          {/* The selected brand tab identifies this chat's channel/site; keep only the unread count. */}
+                          {hasUnread && (
+                            <span className="bg-red-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full shadow-xs animate-pulse">
+                              {unreadCount} new
+                            </span>
+                          )}
                         </div>
                         {usersInfo[userId]?.lastMessage ? (
                           <div className="flex items-center gap-1 mt-0.5">
                             <span className="text-xs text-gray-500 flex-shrink-0">
                               {formatRelativeTime(usersInfo[userId].lastMessage.timestamp, relativeTimeNow, config.timezone, config.dateFormat)}
                             </span>
-                            <span className={`text-xs truncate ${hasUnread ? 'font-bold text-gray-900 dark:text-white' : 'text-gray-500 dark:text-slate-400'}`}>
+                            <span className={`text-xs truncate ${hasUnread ? 'font-bold text-gray-900 dark:text-white' : 'font-normal text-gray-500 dark:text-slate-400'}`}>
                 {usersInfo[userId].lastMessage.sender === 'client' ? 'Customer: ' : usersInfo[userId].lastMessage.sender === 'support' ? 'AI: ' : usersInfo[userId].lastMessage.sender === 'internal_team' ? 'You: ' : ''}{String(usersInfo[userId].lastMessage.text || '').startsWith('/api/telegram/users/') ? '📷 Photo' : usersInfo[userId].lastMessage.text}
                             </span>
                           </div>
