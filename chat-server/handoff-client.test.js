@@ -71,19 +71,23 @@ test('signs exact multipart SMSOTPS photo bytes and posts them to the photo endp
     assert.equal(request.headers['Content-Type'], 'multipart/form-data; boundary=unit_test_boundary');
     assert.ok(request.body.includes(Buffer.from('name=\"chat_id\"')));
     assert.equal(request.headers.Authorization, undefined);
-    assert.equal(request.headers['X-Handoff-Signature'], signSiteHandoffRequest(request.body, '1791482400', 'photo-secret'));
+    const photoHash = crypto.createHash('sha256').update(imageBytes).digest('hex');
+    const canonical = `1791482400.8975496349.check this.${photoHash}`;
+    const expectedSignature = crypto.createHmac('sha256', 'photo-secret').update(canonical).digest('hex');
+    assert.equal(request.headers['X-Handoff-Signature'], expectedSignature);
     assert.ok(request.body.includes(imageBytes));
     assert.ok(request.body.includes(Buffer.from('name=\"caption\"')));
     let sent;
     const result = await sendSitePhotoReply({ siteId: 'smsotps', secret: 'photo-secret', chatId: '8975496349', imageBytes, mimeType: 'image/jpeg', caption: 'check this', nowSeconds: 1791482400, boundary: 'unit_test_boundary' }, async (url, options) => { sent = { url, options }; return { ok: true, status: 201 }; });
     assert.deepEqual(result, { success: true, status: 201 });
     assert.equal(sent.url, REPLY_ENDPOINTS.smsotpsPhoto);
-    assert.equal(sent.options.headers['X-Handoff-Signature'], signSiteHandoffRequest(sent.options.body, '1791482400', 'photo-secret'));
+    assert.equal(sent.options.headers['X-Handoff-Signature'], expectedSignature);
 });
 
 test('rejects malformed SMSOTPS photo request fields', () => {
     const bytes = Buffer.from('img');
     assert.equal(createSitePhotoReplyRequest({ siteId: 'smsotps', secret: 's', chatId: 'bad', imageBytes: bytes, mimeType: 'image/jpeg' }).error, 'invalid_chat_id');
     assert.equal(createSitePhotoReplyRequest({ siteId: 'smsotps', secret: 's', chatId: '1', imageBytes: bytes, mimeType: 'image/svg+xml' }).error, 'unsupported_image_type');
+    assert.equal(createSitePhotoReplyRequest({ siteId: 'smsotps', secret: 's', chatId: '1', imageBytes: bytes, mimeType: 'image/gif' }).error, 'unsupported_image_type');
     assert.equal(createSitePhotoReplyRequest({ siteId: 'smsotps', secret: 's', chatId: '1', imageBytes: Buffer.alloc(5 * 1024 * 1024 + 1), mimeType: 'image/jpeg' }).error, 'invalid_image');
 });
