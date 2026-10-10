@@ -171,7 +171,7 @@ export function ChatArea({ onSendMessage, onDeleteMessage, onLoadMore, onDeleteS
 
   if (!activeUserId) {
     return (
-      <div className="flex-1 flex flex-col bg-gray-50">
+      <div className="flex-1 flex flex-col bg-gray-50 dark:bg-[#0b1120]">
         {/* Mobile header with burger menu */}
         <div className="bg-white border-b border-gray-200 px-4 py-3 md:hidden">
           <button
@@ -183,12 +183,14 @@ export function ChatArea({ onSendMessage, onDeleteMessage, onLoadMore, onDeleteS
             </svg>
           </button>
         </div>
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center text-gray-500">
-            <svg className="w-16 h-16 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-            </svg>
-            <p>{t('chat.selectChat')}</p>
+        <div className="flex-1 flex items-center justify-center px-6">
+          <div className="text-center max-w-sm">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-slate-700 dark:bg-[#151f30]">
+              <svg className="w-8 h-8 text-blue-500 dark:text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+            </div>
+            <p className="text-sm font-semibold text-gray-700 dark:text-slate-200">{t('chat.selectChat')}</p>
           </div>
         </div>
       </div>

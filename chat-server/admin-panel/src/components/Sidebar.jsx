@@ -349,20 +349,20 @@ export function Sidebar({
                   <div
                     key={userId}
                     onClick={() => onSelectUser(userId)}
-                    className={`p-3 border-b border-gray-100 dark:border-slate-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-700 transition relative ${
+                    className={`mx-1 mb-1 rounded-xl p-3 cursor-pointer transition-colors duration-150 relative ${
                       activeUserId === userId
-                        ? 'bg-blue-50 dark:bg-blue-950/50 border-l-4 border-l-blue-600'
+                        ? 'bg-blue-50 dark:bg-blue-950/45 ring-1 ring-inset ring-blue-200 dark:ring-blue-900/70'
                         : hasUnread
-                        ? 'bg-red-50/40 dark:bg-red-950/20 border-l-4 border-l-red-500 hover:bg-red-50/60'
-                        : ''
-                    } ${!online ? 'opacity-70' : ''}`}
+                        ? 'bg-red-50/40 dark:bg-red-950/20 hover:bg-red-50/70 dark:hover:bg-red-950/35 border-l-2 border-l-red-500'
+                        : 'hover:bg-gray-50 dark:hover:bg-slate-700/70'
+                    } ${!online ? 'opacity-80' : ''}`}
                   >
                     <div className="flex items-center gap-3">
                       {/* Avatar */}
                       <div className="relative flex-shrink-0">
                         <ConsoleAvatar userId={userId} info={info} initial={getInitial(userId)} apiToken={config.apiToken} size="w-10 h-10" />
                         {hasUnread && (
-                          <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] px-1 bg-red-600 text-white rounded-full border-2 border-white text-[11px] font-black flex items-center justify-center shadow-xs animate-pulse z-10">
+                          <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] px-1 bg-red-600 text-white rounded-full border-2 border-white text-[11px] font-black flex items-center justify-center shadow-sm z-10">
                             {unreadCount > 99 ? '99+' : unreadCount}
                           </span>
                         )}
@@ -412,7 +412,7 @@ export function Sidebar({
 
                           {/* The selected brand tab identifies this chat's channel/site; keep only the unread count. */}
                           {hasUnread && (
-                            <span className="bg-red-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full shadow-xs animate-pulse">
+                            <span className="bg-red-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full shadow-sm">
                               {unreadCount} new
                             </span>
                           )}
